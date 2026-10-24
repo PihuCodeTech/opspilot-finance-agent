@@ -1,0 +1,22 @@
+# AI workflow reference docs (local source of truth, not committed)
+.workflow/
+
+# Design-skill working files (local only)
+.taste-skill/
+
+# Local secrets and generated data (never committed)
+.env
+data/
+backups/
+*.weights
+forensics_service/weights/
+
+# Python and tooling
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
