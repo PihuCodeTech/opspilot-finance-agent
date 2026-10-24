@@ -7,6 +7,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "argon2-cffi>=25.1.0",
+    "faker>=40.43.0",
     "fastapi>=0.162.0",
     "jinja2>=3.1.6",
     "pgvector>=0.5.1",
@@ -16,6 +17,7 @@ dependencies = [
     "sqlalchemy>=2.1.6",
     "structlog>=26.1.0",
     "uvicorn>=0.54.0",
+    "weasyprint>=70.0",
 ]
 
 [project.scripts]
@@ -43,6 +45,8 @@ allowed-confusables = ["−", "×", "–", "±", "•"]
 "tests/**" = ["S101", "S105", "S106", "PLR2004"]
 # Migrations build DDL from module constants (no external input) and carry long SQL.
 "alembic/versions/**" = ["S608", "E501", "PLR0915"]
+# The generator draws scenario choices with explicit probabilities (documented in docs/datasets.md).
+"src/opspilot/evaluation/generator/build.py" = ["PLR2004", "S311"]
 
 [tool.mypy]
 python_version = "3.12"

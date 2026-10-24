@@ -33,6 +33,15 @@ def get_owner_engine() -> Engine:
     return create_engine(url.get_secret_value(), pool_pre_ping=True, pool_size=1, max_overflow=1)
 
 
+@lru_cache(maxsize=1)
+def get_scorer_engine() -> Engine:
+    """Dataset generation/loading and scoring: the only runtime role that reads labels."""
+    url = get_settings().database_url_scorer
+    if url is None:
+        raise RuntimeError("DATABASE_URL_SCORER is not set")
+    return create_engine(url.get_secret_value(), pool_pre_ping=True, pool_size=1, max_overflow=1)
+
+
 @dataclass(frozen=True)
 class Readiness:
     database_ok: bool

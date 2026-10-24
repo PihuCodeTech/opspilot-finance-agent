@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ layout.title }} {{ number }}</title>
+<style>
+  @font-face { font-family: "Geist"; src: url("Geist-Regular.woff2"); font-weight: 400; }
+  @font-face { font-family: "Geist"; src: url("Geist-Bold.woff2"); font-weight: 700; }
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font-family: "Geist", sans-serif; font-size: 10pt; color: #111; }
+  h1 { font-size: 20pt; margin: 0 0 6mm; letter-spacing: .5px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6mm; }
+  th, td { padding: 2mm 1.5mm; text-align: left; vertical-align: top; }
+  th { border-bottom: 1px solid #333; font-weight: 700; }
+  td { border-bottom: 1px solid #ddd; }
+  .num { text-align: right; white-space: nowrap; }
+  .meta td, .totals td { border: none; padding: 1mm 1.5mm; }
+  .totals { width: 45%; margin-left: auto; }
+  .party { margin-bottom: 4mm; }
+  .notes { margin-top: 8mm; font-size: 9pt; }
+  .pay { margin-top: 6mm; }
+  /* arrangements */
+  .classic .head { display: flex; justify-content: space-between; }
+  .modern h1 { font-weight: 400; font-size: 26pt; }
+  .modern .head { border-left: 4px solid #111; padding-left: 4mm; }
+  .compact { font-size: 9pt; }
+  .compact h1 { font-size: 14pt; text-align: center; }
+  .ledger h1 { font-size: 16pt; text-transform: uppercase; border-bottom: 2px solid #111; }
+  .ledger table th { background: #eee; }
+  .bold h1 { font-size: 30pt; }
+  .bold .totals td { font-size: 12pt; }
+  .sidebar { display: flex; gap: 8mm; }
+  .sidebar .side { width: 32%; border-right: 1px solid #999; padding-right: 4mm; }
+  .sidebar .main { width: 68%; }
+  .sidebar .totals { width: 100%; margin: 0 0 4mm; }
+</style>
+</head>
+<body>
+{% macro meta_table() %}
+<table class="meta">
+  <tr><td>{{ layout.number_label }}</td><td>{{ number }}</td></tr>
+  <tr><td>{{ layout.date_label }}</td><td>{{ date }}</td></tr>
+  {% if po_number %}<tr><td>{{ layout.po_label }}</td><td>{{ po_number }}</td></tr>{% endif %}
+</table>
+{% endmacro %}
+{% macro lines_table() %}
+<table class="lines">
+  <thead><tr>{% for col in layout.columns %}<th class="{{ 'num' if col in ('quantity','unit_price','line_total') }}">{{ layout.column_labels[col] }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for line in lines %}
+    <tr>{% for col in layout.columns %}<td class="{{ 'num' if col in ('quantity','unit_price','line_total') }}">{{ line[col] }}</td>{% endfor %}</tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+{% macro totals_table() %}
+<table class="totals">
+  <tr><td>Subtotal</td><td class="num">{{ layout.currency_prefix }}{{ subtotal }}</td></tr>
+  <tr><td>Tax ({{ tax_rate }})</td><td class="num">{{ layout.currency_prefix }}{{ tax }}</td></tr>
+  <tr><td><strong>Total due</strong></td><td class="num"><strong>{{ layout.currency_prefix }}{{ total }}</strong></td></tr>
+</table>
+{% endmacro %}
+<div class="{{ layout.arrangement }}">
+{% if layout.arrangement == 'sidebar' %}
+  <div class="side">
+    <div class="party"><strong>{{ vendor_name }}</strong><br>{{ vendor_address }}</div>
+    {{ meta_table() }}
+    <div class="pay">{{ layout.bank_label }}<br>{{ bank_account }}</div>
+  </div>
+  <div class="main">
+    <h1>{{ layout.title }}</h1>
+    {{ totals_table() }}
+    <div class="party">Bill to: {{ buyer }}</div>
+    {{ lines_table() }}
+    {% if notes %}<div class="notes">{{ notes }}</div>{% endif %}
+  </div>
+{% else %}
+  <h1>{{ layout.title }}</h1>
+  <div class="head">
+    <div class="party"><strong>{{ vendor_name }}</strong><br>{{ vendor_address }}</div>
+    {{ meta_table() }}
+  </div>
+  <div class="party">Bill to: {{ buyer }}</div>
+  {{ lines_table() }}
+  {{ totals_table() }}
+  <div class="pay">{{ layout.bank_label }}: {{ bank_account }}</div>
+  {% if notes %}<div class="notes">{{ notes }}</div>{% endif %}
+{% endif %}
+</div>
+</body>
+</html>

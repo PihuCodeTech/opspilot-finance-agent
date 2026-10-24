@@ -17,7 +17,18 @@ import structlog
 from opspilot.config import get_settings
 from opspilot.db.roles import RoleProvisioningError, provision_roles
 from opspilot.db.seed import seed
-from opspilot.db.session import get_owner_engine
+from opspilot.db.session import get_owner_engine, get_scorer_engine
+from opspilot.evaluation.archive import archive_bundle
+from opspilot.evaluation.datasets import DatasetError, freeze_dataset, load_bundle
+from opspilot.evaluation.generator.build import DEFAULT_SPECS, SplitSpec, generate
+from opspilot.evaluation.generator.bundle import (
+    BundleError,
+    labels_document,
+    read_bundle,
+    verify_bundle,
+    write_bundle,
+)
+from opspilot.evaluation.subset import SUBSET_SEED, SUBSET_SIZE, stratified_subset
 from opspilot.logs import configure_logging
 from opspilot.policy.document import render_policy
 from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
@@ -25,8 +36,6 @@ from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
 log = structlog.get_logger()
 
 _PLANNED: dict[str, tuple[str, str]] = {
-    "generate": ("Generate a synthetic dataset split", "P3"),
-    "dataset": ("Freeze, fetch or verify datasets", "P3"),
     "preprocess": ("Run shared non-LLM preprocessing for a dataset", "P4"),
     "audit": ("Verify audit chains and evidence digests", "P8"),
     "cleanup": ("Checkpoint retention and held-case re-check", "P9"),
@@ -102,6 +111,58 @@ def _seed(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _generate(args: argparse.Namespace) -> int:
+    base = DEFAULT_SPECS[args.split]
+    spec = SplitSpec(
+        base.split,
+        args.seed if args.seed is not None else base.seed,
+        args.size if args.size is not None else base.size,
+        base.clean_ratio,
+        base.multi_ratio,
+        base.heldout,
+        base.adversarial,
+    )
+    world = generate(spec, load_policy().config)
+    target = write_bundle(world, Path(args.out))
+    sys.stdout.write(f"{len(world.items)} invoices written to {target}\n")
+    return 0
+
+
+def _dataset(args: argparse.Namespace) -> int:
+    bundle = Path(args.bundle)
+    try:
+        if args.dataset_command == "verify":
+            problems = verify_bundle(bundle)
+            for problem in problems:
+                sys.stdout.write(f"{problem}\n")
+            sys.stdout.write("ok\n" if not problems else f"{len(problems)} problem(s)\n")
+            return 0 if not problems else 1
+        if args.dataset_command == "subset":
+            keys = stratified_subset(labels_document(read_bundle(bundle)), args.size, args.seed)
+            sys.stdout.write("\n".join(keys) + "\n")
+            return 0
+        if args.dataset_command == "archive":
+            target, digest = archive_bundle(bundle, Path(args.out))
+            sys.stdout.write(f"{target}\nsha256 {digest}\n")
+            return 0
+        settings = get_settings()
+        if args.dataset_command == "load":
+            result = load_bundle(
+                get_scorer_engine(),
+                bundle,
+                Path(settings.document_store_path),
+                settings.bank_hmac_key.get_secret_value(),
+            )
+            sys.stdout.write(f"loaded {result.name} {result.version}: {result.items} invoices\n")
+        else:
+            frozen_at = freeze_dataset(get_scorer_engine(), bundle)
+            sys.stdout.write(f"frozen at {frozen_at.isoformat()}\n")
+    except (BundleError, DatasetError) as exc:
+        sys.stderr.write(f"opspilot dataset {args.dataset_command}: {exc}\n")
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -123,6 +184,31 @@ def build_parser() -> argparse.ArgumentParser:
     provision.set_defaults(handler=_provision_roles)
     seed_cmd = sub.add_parser("seed", help="Create demo users and activate the policy version")
     seed_cmd.set_defaults(handler=_seed)
+    gen = sub.add_parser("generate", help="Generate a synthetic dataset bundle (renders PDFs)")
+    gen.add_argument("--split", choices=sorted(DEFAULT_SPECS), required=True)
+    gen.add_argument("--seed", type=int, help="override the split's fixed seed")
+    gen.add_argument("--size", type=int, help="override the split's size")
+    gen.add_argument("--out", default="data/datasets", help="directory for the bundle")
+    gen.set_defaults(handler=_generate)
+    dataset = sub.add_parser("dataset", help="Verify, load or freeze a dataset bundle")
+    dataset_sub = dataset.add_subparsers(dest="dataset_command", required=True)
+    for name, text in (
+        ("verify", "Check every file against the manifest"),
+        ("load", "Load into the database (scorer role)"),
+        ("freeze", "Freeze a loaded dataset (irreversible)"),
+    ):
+        cmd = dataset_sub.add_parser(name, help=text)
+        cmd.add_argument("bundle", help="path to the bundle directory")
+        cmd.set_defaults(handler=_dataset)
+    subset = dataset_sub.add_parser("subset", help="Print the pre-declared stratified subset keys")
+    subset.add_argument("bundle", help="path to the bundle directory")
+    subset.add_argument("--size", type=int, default=SUBSET_SIZE)
+    subset.add_argument("--seed", type=int, default=SUBSET_SEED)
+    subset.set_defaults(handler=_dataset)
+    archive = dataset_sub.add_parser("archive", help="Write a reproducible .tar.gz and its SHA-256")
+    archive.add_argument("bundle", help="path to the bundle directory")
+    archive.add_argument("--out", default="data/releases")
+    archive.set_defaults(handler=_dataset)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))

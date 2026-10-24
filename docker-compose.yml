@@ -51,6 +51,22 @@ services:
     volumes:
       - documents:/app/data/documents
 
+  # One-off dataset commands (generate, verify, load, freeze). Only this service mounts
+  # the bundles, which contain labels.json; app and worker never see labels (rules.md §2).
+  # Usage: docker compose run --rm tools opspilot generate --split dev
+  tools:
+    build: .
+    profiles: ["tools"]
+    env_file: .env
+    user: root
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - documents:/app/data/documents
+      - ./data/datasets:/app/data/datasets
+      - ./data/releases:/app/data/releases
+
 volumes:
   db-data:
   documents:
