@@ -34,6 +34,8 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PL", "N", "ASYNC", "BLE", "T20"]
 ignore = ["PLR0913"]
+# Typographic characters used on purpose in UI and policy text (07-design.md §5).
+allowed-confusables = ["−", "×", "–", "±", "•"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "PLR2004"]

@@ -9,12 +9,15 @@ import signal
 import sys
 import threading
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from types import FrameType
 
 import structlog
 
 from opspilot.config import get_settings
 from opspilot.logs import configure_logging
+from opspilot.policy.document import render_policy
+from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
 
 log = structlog.get_logger()
 
@@ -23,7 +26,6 @@ _PLANNED: dict[str, tuple[str, str]] = {
     "generate": ("Generate a synthetic dataset split", "P3"),
     "dataset": ("Freeze, fetch or verify datasets", "P3"),
     "preprocess": ("Run shared non-LLM preprocessing for a dataset", "P4"),
-    "policy": ("Build and index the policy document from the configuration", "P1/P7"),
     "audit": ("Verify audit chains and evidence digests", "P8"),
     "cleanup": ("Checkpoint retention and held-case re-check", "P9"),
     "eval": ("Run, score or rescore an evaluation", "P14"),
@@ -58,11 +60,33 @@ def _worker(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _policy_build(args: argparse.Namespace) -> int:
+    """Validate the policy configuration and render the policy document (indexing is P7)."""
+    policy = load_policy(Path(args.config))
+    document = render_policy(policy)
+    Path(args.out).write_text(document.text, encoding="utf-8")
+    sys.stdout.write(
+        f"policy {document.version}\n"
+        f"config sha256   {document.config_sha256}\n"
+        f"document sha256 {document.document_sha256}\n"
+        f"written to {args.out}\n"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     worker = sub.add_parser("worker", help="Run the background worker")
     worker.set_defaults(handler=_worker)
+    policy = sub.add_parser("policy", help="Policy configuration and document")
+    policy_sub = policy.add_subparsers(dest="policy_command", required=True)
+    build = policy_sub.add_parser(
+        "build", help="Validate the configuration and render the document"
+    )
+    build.add_argument("--config", default=str(DEFAULT_POLICY_PATH), help="policy TOML file")
+    build.add_argument("--out", default="policy.md", help="where to write the Markdown document")
+    build.set_defaults(handler=_policy_build)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))
