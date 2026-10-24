@@ -1,4 +1,5 @@
 # Lint, types and tests on every push and pull request.
+# Actions are pinned to commit SHAs (supply-chain safety; setup-uv publishes no major tags).
 # No secrets are used: tests never call a live LLM (LLM_MODE=replay), so CI costs nothing.
 name: ci
 
@@ -31,8 +32,8 @@ jobs:
       SESSION_SECRET: ci-only-session-secret-not-used-anywhere-else-000
       BANK_HMAC_KEY: ci-only-bank-hmac-key-not-used-anywhere-else-00000
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0 (no floating major tags upstream)
       - run: uv sync --frozen
       - run: uv run ruff format --check .
       - run: uv run ruff check .
