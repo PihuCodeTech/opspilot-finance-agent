@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
+    "argon2-cffi>=25.1.0",
     "fastapi>=0.162.0",
     "jinja2>=3.1.6",
+    "pgvector>=0.5.1",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
@@ -39,6 +41,8 @@ allowed-confusables = ["−", "×", "–", "±", "•"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "PLR2004"]
+# Migrations build DDL from module constants (no external input) and carry long SQL.
+"alembic/versions/**" = ["S608", "E501", "PLR0915"]
 
 [tool.mypy]
 python_version = "3.12"

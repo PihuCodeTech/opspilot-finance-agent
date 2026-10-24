@@ -1,7 +1,7 @@
 """Engine creation and the readiness check.
 
-P0 uses one connection (DATABASE_URL). The per-role connections from
-`06-database.md` §7 are added with the schema in P2.
+Each runtime role has its own connection URL (`06-database.md` §7); code uses
+the engine for the job it is doing, never a more privileged one.
 """
 
 from dataclasses import dataclass
@@ -22,6 +22,15 @@ _ALEMBIC_INI = Path(__file__).resolve().parents[3] / "alembic.ini"
 def get_engine() -> Engine:
     url = get_settings().database_url.get_secret_value()
     return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+
+
+@lru_cache(maxsize=1)
+def get_owner_engine() -> Engine:
+    """Schema owner: migrations, role provisioning and seeding only."""
+    url = get_settings().database_url_owner
+    if url is None:
+        raise RuntimeError("DATABASE_URL_OWNER is not set")
+    return create_engine(url.get_secret_value(), pool_pre_ping=True, pool_size=1, max_overflow=1)
 
 
 @dataclass(frozen=True)

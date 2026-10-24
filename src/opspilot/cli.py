@@ -15,6 +15,9 @@ from types import FrameType
 import structlog
 
 from opspilot.config import get_settings
+from opspilot.db.roles import RoleProvisioningError, provision_roles
+from opspilot.db.seed import seed
+from opspilot.db.session import get_owner_engine
 from opspilot.logs import configure_logging
 from opspilot.policy.document import render_policy
 from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
@@ -22,7 +25,6 @@ from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
 log = structlog.get_logger()
 
 _PLANNED: dict[str, tuple[str, str]] = {
-    "seed": ("Create demo users, the active policy version and the demo dataset", "P2"),
     "generate": ("Generate a synthetic dataset split", "P3"),
     "dataset": ("Freeze, fetch or verify datasets", "P3"),
     "preprocess": ("Run shared non-LLM preprocessing for a dataset", "P4"),
@@ -74,6 +76,32 @@ def _policy_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _provision_roles(_args: argparse.Namespace) -> int:
+    try:
+        roles = provision_roles(get_settings())
+    except RoleProvisioningError as exc:
+        sys.stderr.write(f"opspilot db provision-roles: {exc}\n")
+        return 1
+    sys.stdout.write(f"login enabled for: {', '.join(roles)}\n")
+    return 0
+
+
+def _seed(_args: argparse.Namespace) -> int:
+    settings = get_settings()
+    password = settings.demo_password.get_secret_value() if settings.demo_password else None
+    result = seed(get_owner_engine(), load_policy(), password)
+    lines = [
+        f"policy {result.policy_version}: "
+        f"{'created' if result.policy_created else 'already present'}, active, "
+        f"{result.chunk_count} sections",
+        f"users created: {', '.join(result.created_users) or 'none (all exist)'}",
+    ]
+    if result.password:
+        lines.append(f"demo password (shown once, local/preview only): {result.password}")
+    sys.stdout.write("\n".join(lines) + "\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -87,6 +115,14 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--config", default=str(DEFAULT_POLICY_PATH), help="policy TOML file")
     build.add_argument("--out", default="policy.md", help="where to write the Markdown document")
     build.set_defaults(handler=_policy_build)
+    db = sub.add_parser("db", help="Database administration (runs as the owner)")
+    db_sub = db.add_subparsers(dest="db_command", required=True)
+    provision = db_sub.add_parser(
+        "provision-roles", help="Enable login for runtime roles using passwords from .env"
+    )
+    provision.set_defaults(handler=_provision_roles)
+    seed_cmd = sub.add_parser("seed", help="Create demo users and activate the policy version")
+    seed_cmd.set_defaults(handler=_seed)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))

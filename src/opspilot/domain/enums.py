@@ -130,3 +130,95 @@ class VerificationChannel(StrEnum):
 class ApproverTier(StrEnum):
     STANDARD = "standard"
     CONTROLLER = "controller"
+
+
+class UserRole(StrEnum):
+    """Roles a user account can hold; exactly one per user (`06-database.md` §3)."""
+
+    ANALYST = "analyst"
+    APPROVER = "approver"
+    AUDITOR = "auditor"
+
+
+class DatasetSplit(StrEnum):
+    DEV = "dev"
+    FINAL = "final"
+    ADVERSARIAL = "adversarial"
+    DEMO = "demo"
+    FATURA = "fatura"
+
+
+class DocumentKind(StrEnum):
+    INVOICE = "invoice"
+    PO = "po"
+    RECEIPT = "receipt"
+    UPLOAD = "upload"
+    SUPPORTING = "supporting"
+
+
+class DocumentSource(StrEnum):
+    GENERATED = "generated"
+    UPLOAD = "upload"
+
+
+class RunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class MatchMethod(StrEnum):
+    SKU = "sku"
+    DESCRIPTION = "description"
+    LLM = "llm"
+    UNMATCHED = "unmatched"
+
+
+class CheckCode(StrEnum):
+    """One TruthLens check each (`04-prd.md` §3)."""
+
+    PO_LOOKUP = "po_lookup"
+    PRICE = "price"
+    QUANTITY = "quantity"
+    ARITHMETIC = "arithmetic"
+    TAX = "tax"
+    DUPLICATE = "duplicate"
+    VENDOR_APPROVED = "vendor_approved"
+    APPROVAL_LEVEL = "approval_level"
+    BANK_DETAILS = "bank_details"
+
+
+class Severity(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class GroundingStatus(StrEnum):
+    OK = "ok"
+    FALLBACK = "fallback"
+
+
+class JobType(StrEnum):
+    INVESTIGATE = "investigate"
+    RESUME = "resume"
+    CLEANUP = "cleanup"
+
+
+class JobStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class EvalSystem(StrEnum):
+    OPSPILOT = "opspilot"
+    BASELINE = "baseline"
+
+
+class EvalRunStatus(StrEnum):
+    RUNNING = "running"
+    STOPPED = "stopped"  # paused at a quota limit; resumable
+    COMPLETED = "completed"
+    FAILED = "failed"

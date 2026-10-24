@@ -19,7 +19,8 @@ services:
   migrate:
     build: .
     env_file: .env
-    command: ["alembic", "upgrade", "head"]
+    # Migrate as the owner, then enable the runtime roles' logins from .env.
+    command: ["sh", "-c", "alembic upgrade head && opspilot db provision-roles"]
     depends_on:
       db:
         condition: service_healthy
