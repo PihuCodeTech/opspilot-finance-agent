@@ -1,0 +1,79 @@
+/* Design tokens: the only place raw colours, sizes and radii live (07-design.md §4, §4.1). */
+
+@font-face { font-family: "Geist"; src: url("../fonts/geist/Geist-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Geist"; src: url("../fonts/geist/Geist-Medium.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Geist"; src: url("../fonts/geist/Geist-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("../fonts/geist/GeistMono-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("../fonts/geist/GeistMono-Medium.woff2") format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
+
+:root {
+  color-scheme: light;
+
+  --ground: #f2f4f7;
+  --surface: #ffffff;
+  --raised: #eeeeee;
+  --active: #e9ebef;
+  --border: #e6e6e6;
+  --rule: #f0f0f0;
+  --control: #d4d4d4;
+  --control-strong: #8a8a8a;
+
+  --text: #0a0a0a;
+  --muted: #5f6368;
+  --faint: #6b6b6b;
+
+  --primary: #141414;
+  --primary-label: #ffffff;
+  --data: #1d5fbf;
+  --compare: #8a8a8a;
+
+  --positive: #2e7d32;  --pill-positive-bg: #dcfae5;  --pill-positive-ink: #04250e;
+  --negative: #c4242a;  --pill-negative-bg: #ffedea;  --pill-negative-ink: #831c1e;
+  --warning: #92400e;   --pill-warning-bg: #fffbeb;   --pill-warning-ink: #92400e;  --notice-border: #fde68a;
+  --pill-neutral-bg: #eeeeee;  --pill-neutral-ink: #3d3d3d;
+
+  --focus: #0a0a0a;
+
+  --radius-card: 8px;  --radius-control: 6px;  --radius-chip: 4px;
+  --gap: 12px;  --card-pad: 20px;  --pad: 24px;
+  --sidebar-width: 256px;  --nav-row: 34px;
+  --control-height: 36px;  --row-height: 44px;  --row-height-2line: 60px;
+
+  --font: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --fs-title: 24px;  --fs-section: 16px;  --fs-kpi: 30px;  --fs-body: 14px;  --fs-small: 12px;
+  --lh-body: 20px;  --lh-section: 24px;
+
+  --t-fast: 120ms;  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Dark values, shared by the explicit choice and by "System" on a dark OS. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e0f10;  --surface: #16181a;  --raised: #202225;  --active: #26292c;
+  --border: #26292c;  --rule: #1c1e20;     --control: #3a3d41;  --control-strong: #7a7f85;
+  --text: #f2f2f2;    --muted: #b4b4b4;    --faint: #949494;
+  --primary: #f2f2f2;  --primary-label: #0a0a0a;
+  --data: #6ea0f0;    --compare: #6f7378;
+  --positive: #4cc38a;  --pill-positive-bg: #13261b;  --pill-positive-ink: #6fd39f;
+  --negative: #ef6b73;  --pill-negative-bg: #2c1618;  --pill-negative-ink: #f08a90;
+  --warning: #e0a24a;   --pill-warning-bg: #2a2010;   --pill-warning-ink: #f0b45a;  --notice-border: #5a4415;
+  --pill-neutral-bg: #26292c;  --pill-neutral-ink: #d4d4d4;
+  --focus: #f2f2f2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e0f10;  --surface: #16181a;  --raised: #202225;  --active: #26292c;
+    --border: #26292c;  --rule: #1c1e20;     --control: #3a3d41;  --control-strong: #7a7f85;
+    --text: #f2f2f2;    --muted: #b4b4b4;    --faint: #949494;
+    --primary: #f2f2f2;  --primary-label: #0a0a0a;
+    --data: #6ea0f0;    --compare: #6f7378;
+    --positive: #4cc38a;  --pill-positive-bg: #13261b;  --pill-positive-ink: #6fd39f;
+    --negative: #ef6b73;  --pill-negative-bg: #2c1618;  --pill-negative-ink: #f08a90;
+    --warning: #e0a24a;   --pill-warning-bg: #2a2010;   --pill-warning-ink: #f0b45a;  --notice-border: #5a4415;
+    --pill-neutral-bg: #26292c;  --pill-neutral-ink: #d4d4d4;
+    --focus: #f2f2f2;
+  }
+}
