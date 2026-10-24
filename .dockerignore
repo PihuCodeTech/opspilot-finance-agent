@@ -1,0 +1,14 @@
+.git
+.venv
+.workflow
+.taste-skill
+.env
+data
+backups
+results
+tests
+docs
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
