@@ -1,0 +1,55 @@
+# Local and preview runtime. Everything here is free and runs locally.
+# Usage: cp .env.example .env (fill it in), then: docker compose up --build
+# The optional TruFor service (profile "forensics") is added in P15.
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    env_file: .env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  migrate:
+    build: .
+    env_file: .env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    env_file: .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - documents:/app/data/documents
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build: .
+    env_file: .env
+    command: ["opspilot", "worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - documents:/app/data/documents
+
+volumes:
+  db-data:
+  documents:
