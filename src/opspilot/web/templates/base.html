@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %} data-views3d="{{ 'on' if views_3d else 'off' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}OpsPilot{% endblock %}</title>
+  <link rel="preload" href="{{ url_for('static', path='fonts/geist/Geist-Regular.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+  <script src="{{ url_for('static', path='vendor/htmx/htmx.min.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <main id="main" class="canvas">
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>
