@@ -241,6 +241,13 @@ def _sections(config: PolicyConfig, vendors: Sequence[VendorEntry]) -> list[str]
         + "; ".join(FINDING_WORDS[c] for c in sorted(config.resolutions.recheck_only))
         + ".",
         "",
+        "## 10. Approved vendors",
+        "",
+        "Invoices may be approved for payment only when the vendor is on the approved vendor "
+        "list held in the vendor master. An invoice from a vendor that is not on the list is an "
+        "exception and is resolved only with a procurement approval naming the vendor (section 9). "
+        "Appendix A lists the approved vendors for this edition where a list is published.",
+        "",
         "## Appendix A. Approved vendors",
         "",
     ]

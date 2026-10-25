@@ -6,7 +6,7 @@
 # this file, so they can't disagree. Decimals are written as strings on purpose:
 # TOML floats are binary and are rejected by the loader.
 
-version = "2026.10-2"
+version = "2026.10-3"
 currency = "USD"
 rounding = "half_up"
 

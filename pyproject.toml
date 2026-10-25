@@ -16,6 +16,7 @@ dependencies = [
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
+    "sentence-transformers==6.1.0",
     "sqlalchemy>=2.1.6",
     "structlog>=26.1.0",
     "torch==2.14.1",
@@ -80,6 +81,7 @@ addopts = "-ra --strict-markers"
 markers = [
   "integration: needs a real PostgreSQL (TEST_DATABASE_URL); skipped when it isn't set",
   "docling: runs Docling on real PDFs (downloads its models on first use; a few seconds each)",
+  "models: loads the local embedding model (downloads it on first use)",
 ]
 
 [dependency-groups]

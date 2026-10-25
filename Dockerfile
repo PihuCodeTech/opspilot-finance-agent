@@ -33,6 +33,13 @@ ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
 RUN HF_HOME=/tmp/hf docling-tools models download layout tableformer -o /opt/docling-models \
     && rm -rf /tmp/hf
 
+# The policy-search embedding model (bge-small, 384 dims), also fetched once at build time.
+# At runtime Hugging Face is offline: nothing is downloaded and nothing leaves the machine.
+ENV HF_HOME=/opt/hf-cache
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5', device='cpu')" \
+    && chmod -R a+rX /opt/hf-cache
+ENV HF_HUB_OFFLINE=1
+
 RUN useradd --create-home --uid 10001 opspilot \
     && mkdir -p /app/data/documents \
     && chown -R opspilot:opspilot /app/data

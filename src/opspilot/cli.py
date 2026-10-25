@@ -42,6 +42,8 @@ from opspilot.llm.smoke import run_smoke
 from opspilot.logs import configure_logging
 from opspilot.policy.document import render_policy
 from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
+from opspilot.policy.retrieval_eval import evaluate as evaluate_retrieval
+from opspilot.policy.retrieve import Embedder, active_version_id, index_policy, retrieve
 
 log = structlog.get_logger()
 
@@ -217,12 +219,43 @@ def _llm_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
-    sub = parser.add_subparsers(dest="command", required=True)
-    worker = sub.add_parser("worker", help="Run the background worker")
-    worker.set_defaults(handler=_worker)
-    policy = sub.add_parser("policy", help="Policy configuration and document")
+def _policy_index(_args: argparse.Namespace) -> int:
+    engine = get_owner_engine()
+    count = index_policy(engine, Embedder(), active_version_id(engine))
+    sys.stdout.write(f"embedded {count} section(s) of the active policy\n")
+    return 0
+
+
+def _policy_search(args: argparse.Namespace) -> int:
+    passages = retrieve(get_engine(), Embedder(), args.question, mode=args.mode)
+    if not passages:
+        sys.stdout.write("No applicable policy passage found.\n")
+    for p in passages:
+        sys.stdout.write(
+            f"§{p.section_id} {p.title}  (fts {p.fts_rank}, vector {p.vector_rank}, "
+            f"similarity {p.similarity:.2f})\n"
+        )
+    return 0
+
+
+def _policy_eval(_args: argparse.Namespace) -> int:
+    sys.stdout.write(
+        "| mode | recall@5 | MRR | hit rate | unrelated → nothing |\n|---|---|---|---|---|\n"
+    )
+    for score in evaluate_retrieval(get_engine(), Embedder()):
+        sys.stdout.write(
+            f"| {score.mode} | {score.recall_at_5:.2f} | {score.mrr:.2f} | {score.hit_rate:.2f} "
+            f"({score.answerable} q) | {score.no_answer_correct:.2f} "
+            f"({score.unanswerable} q) |\n"
+        )
+    return 0
+
+
+type Subparsers = argparse._SubParsersAction[argparse.ArgumentParser]
+
+
+def _add_policy(sub: Subparsers) -> None:
+    policy = sub.add_parser("policy", help="Policy configuration, document and search")
     policy_sub = policy.add_subparsers(dest="policy_command", required=True)
     build = policy_sub.add_parser(
         "build", help="Validate the configuration and render the document"
@@ -230,6 +263,17 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--config", default=str(DEFAULT_POLICY_PATH), help="policy TOML file")
     build.add_argument("--out", default="policy.md", help="where to write the Markdown document")
     build.set_defaults(handler=_policy_build)
+    index = policy_sub.add_parser("index", help="Embed the active policy's sections (owner)")
+    index.set_defaults(handler=_policy_index)
+    search = policy_sub.add_parser("search", help="Search the active policy")
+    search.add_argument("question")
+    search.add_argument("--mode", choices=["hybrid", "fts", "vector"], default="hybrid")
+    search.set_defaults(handler=_policy_search)
+    evaluate = policy_sub.add_parser("evaluate-retrieval", help="Recall@5 per retrieval mode")
+    evaluate.set_defaults(handler=_policy_eval)
+
+
+def _add_admin(sub: Subparsers) -> None:
     db = sub.add_parser("db", help="Database administration (runs as the owner)")
     db_sub = db.add_subparsers(dest="db_command", required=True)
     provision = db_sub.add_parser(
@@ -238,6 +282,9 @@ def build_parser() -> argparse.ArgumentParser:
     provision.set_defaults(handler=_provision_roles)
     seed_cmd = sub.add_parser("seed", help="Create demo users and activate the policy version")
     seed_cmd.set_defaults(handler=_seed)
+
+
+def _add_data(sub: Subparsers) -> None:
     gen = sub.add_parser("generate", help="Generate a synthetic dataset bundle (renders PDFs)")
     gen.add_argument("--split", choices=sorted(DEFAULT_SPECS), required=True)
     gen.add_argument("--seed", type=int, help="override the split's fixed seed")
@@ -268,11 +315,23 @@ def build_parser() -> argparse.ArgumentParser:
     pre.add_argument("--version", required=True, help="dataset version, e.g. g1-s1001")
     pre.add_argument("--limit", type=int, help="parse at most this many (for a quick check)")
     pre.set_defaults(handler=_preprocess)
+
+
+def _add_llm(sub: Subparsers) -> None:
     llm = sub.add_parser("llm", help="LLM utilities")
     llm_sub = llm.add_subparsers(dest="llm_command", required=True)
     smoke = llm_sub.add_parser("smoke", help="One live call with synthetic text (uses quota)")
     smoke.add_argument("--fixtures", default="tests/fixtures/llm")
     smoke.set_defaults(handler=_llm_smoke)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    worker = sub.add_parser("worker", help="Run the background worker")
+    worker.set_defaults(handler=_worker)
+    for add in (_add_policy, _add_admin, _add_data, _add_llm):
+        add(sub)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))

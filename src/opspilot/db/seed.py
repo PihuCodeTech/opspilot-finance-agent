@@ -72,7 +72,11 @@ def _seed_users(session: Session, password: str) -> list[str]:
 def _seed_policy(session: Session, policy: LoadedPolicy) -> tuple[bool, int]:
     current = session.scalar(select(PolicyVersion).where(PolicyVersion.version == policy.version))
     if current is not None:
-        if current.config_sha256 != policy.config_sha256:
+        rendered = render_policy(policy)
+        if (current.config_sha256, current.document_sha256) != (
+            policy.config_sha256,
+            rendered.document_sha256,
+        ):
             raise RuntimeError(
                 f"policy version {policy.version} exists with different content; bump `version`"
             )
