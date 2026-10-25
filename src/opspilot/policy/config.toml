@@ -6,7 +6,7 @@
 # this file, so they can't disagree. Decimals are written as strings on purpose:
 # TOML floats are binary and are rejected by the loader.
 
-version = "2026.10-1"
+version = "2026.10-2"
 currency = "USD"
 rounding = "half_up"
 
@@ -18,6 +18,11 @@ invoice_total_abs = "0.05"              # sum of lines (+ tax) within ±0.05
 tax_abs = "0.01"                        # stated tax within ±0.01 of computed tax
 near_duplicate_total_pct = "0.50"       # same vendor, total within ±0.5% …
 near_duplicate_window_days = 30         # … invoice dates within 30 days, same line set
+
+[extraction]
+# A check whose input field was read with lower confidence than this is `inconclusive`:
+# it never passes and never raises an exception (04-prd.md §3). Missing confidence counts as 0.
+min_field_confidence = "0.90"
 
 [approval_levels]                       # PO approval levels
 level_1_max = "10000.00"

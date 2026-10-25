@@ -283,6 +283,9 @@ class LedgerInvoiceLine(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     ledger_invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ledger_invoices.id"))
     po_line_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("po_lines.id"), index=True)
+    # As printed on the processed invoice: the duplicate check compares line sets by SKU,
+    # or by description where no SKU was printed (docs/datasets.md).
+    sku: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text)
     quantity: Mapped[Decimal] = mapped_column(QUANTITY)
     unit_price: Mapped[Decimal] = mapped_column(UNIT_PRICE)

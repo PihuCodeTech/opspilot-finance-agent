@@ -68,6 +68,10 @@ class Tolerances(_Strict):
     near_duplicate_window_days: int = Field(gt=0)
 
 
+class Extraction(_Strict):
+    min_field_confidence: ExactDecimal = Field(le=1)
+
+
 class ApprovalLevels(_Strict):
     level_1_max: ExactDecimal
     level_2_max: ExactDecimal
@@ -188,6 +192,7 @@ class PolicyConfig(_Strict):
     currency: Literal["USD"]
     rounding: Literal["half_up"]
     tolerances: Tolerances
+    extraction: Extraction
     approval_levels: ApprovalLevels
     approver_limits: ApproverLimits
     bank_verification: BankVerification

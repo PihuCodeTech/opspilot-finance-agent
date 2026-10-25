@@ -174,6 +174,7 @@ def load_bundle(engine: Engine, bundle: Path, document_store: Path, bank_key: st
                     LedgerInvoiceLine(
                         ledger_invoice_id=ledger.id,
                         po_line_id=po_line,
+                        sku=ln.sku,
                         description=ln.description,
                         quantity=ln.quantity,
                         unit_price=ln.unit_price,
