@@ -7,6 +7,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
     "argon2-cffi>=25.1.0",
+    "docling==2.137.0",
     "faker>=40.43.0",
     "fastapi>=0.162.0",
     "jinja2>=3.1.6",
@@ -16,6 +17,8 @@ dependencies = [
     "pydantic-settings>=2.16.1",
     "sqlalchemy>=2.1.6",
     "structlog>=26.1.0",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
     "uvicorn>=0.54.0",
     "weasyprint>=70.0",
 ]
@@ -29,6 +32,17 @@ build-backend = "uv_build"
 
 [tool.uv]
 python-preference = "managed"
+
+# CPU-only PyTorch on Linux (Docker, CI): the default Linux wheels bundle CUDA and are
+# several GB. macOS wheels are CPU-only already.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.ruff]
 line-length = 100
@@ -64,6 +78,7 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
   "integration: needs a real PostgreSQL (TEST_DATABASE_URL); skipped when it isn't set",
+  "docling: runs Docling on real PDFs (downloads its models on first use; a few seconds each)",
 ]
 
 [dependency-groups]

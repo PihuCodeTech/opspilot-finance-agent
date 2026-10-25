@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     ollama_model: str | None = None
 
     document_store_path: str = "data/documents"
+    # Pre-downloaded Docling models (the Docker image sets this; local runs download on first use).
+    docling_artifacts_path: str | None = None
     upload_max_bytes: PositiveInt = 10 * 1024 * 1024
     forensics_url: str | None = None
     checkpoint_retention_days: PositiveInt = 30

@@ -17,7 +17,7 @@ import structlog
 from opspilot.config import get_settings
 from opspilot.db.roles import RoleProvisioningError, provision_roles
 from opspilot.db.seed import seed
-from opspilot.db.session import get_owner_engine, get_scorer_engine
+from opspilot.db.session import get_engine, get_owner_engine, get_scorer_engine
 from opspilot.evaluation.archive import archive_bundle
 from opspilot.evaluation.datasets import DatasetError, freeze_dataset, load_bundle
 from opspilot.evaluation.generator.build import DEFAULT_SPECS, SplitSpec, generate
@@ -29,6 +29,14 @@ from opspilot.evaluation.generator.bundle import (
     write_bundle,
 )
 from opspilot.evaluation.subset import SUBSET_SEED, SUBSET_SIZE, stratified_subset
+from opspilot.extraction.bank_tokens import PossibleAccountLeakError
+from opspilot.extraction.preprocess import (
+    PARSER_VERSION,
+    Preprocessor,
+    UnsupportedDocumentError,
+    pending_documents,
+    preprocess_document,
+)
 from opspilot.logs import configure_logging
 from opspilot.policy.document import render_policy
 from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
@@ -36,7 +44,6 @@ from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
 log = structlog.get_logger()
 
 _PLANNED: dict[str, tuple[str, str]] = {
-    "preprocess": ("Run shared non-LLM preprocessing for a dataset", "P4"),
     "audit": ("Verify audit chains and evidence digests", "P8"),
     "cleanup": ("Checkpoint retention and held-case re-check", "P9"),
     "eval": ("Run, score or rescore an evaluation", "P14"),
@@ -163,6 +170,32 @@ def _dataset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _preprocess(args: argparse.Namespace) -> int:
+    """Shared non-LLM preprocessing for a dataset (runs as the app role; resumable)."""
+    settings = get_settings()
+    engine = get_engine()
+    preprocessor = Preprocessor(
+        settings.bank_hmac_key.get_secret_value(), settings.docling_artifacts_path
+    )
+    pending = pending_documents(engine, args.dataset, args.version)
+    if args.limit:
+        pending = pending[: args.limit]
+    sys.stdout.write(f"{PARSER_VERSION}: {len(pending)} document(s) to parse\n")
+    failures = 0
+    for index, document_id in enumerate(pending, start=1):
+        try:
+            preprocess_document(
+                engine, preprocessor, document_id, Path(settings.document_store_path)
+            )
+        except (UnsupportedDocumentError, PossibleAccountLeakError) as exc:
+            failures += 1
+            log.error("preprocess.failed", document_id=str(document_id), reason=str(exc))
+        if index % 25 == 0:
+            sys.stdout.write(f"  {index}/{len(pending)}\n")
+    sys.stdout.write(f"done; {failures} failure(s)\n")
+    return 1 if failures else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -209,6 +242,11 @@ def build_parser() -> argparse.ArgumentParser:
     archive.add_argument("bundle", help="path to the bundle directory")
     archive.add_argument("--out", default="data/releases")
     archive.set_defaults(handler=_dataset)
+    pre = sub.add_parser("preprocess", help="Parse a dataset's documents (Docling, no LLM)")
+    pre.add_argument("--dataset", required=True, help="dataset name, e.g. dev")
+    pre.add_argument("--version", required=True, help="dataset version, e.g. g1-s1001")
+    pre.add_argument("--limit", type=int, help="parse at most this many (for a quick check)")
+    pre.set_defaults(handler=_preprocess)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))

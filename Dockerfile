@@ -6,6 +6,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
+    UV_NO_CACHE=1 \
     UV_PYTHON_DOWNLOADS=never \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
@@ -25,6 +26,12 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
 RUN uv sync --frozen --no-dev
+
+# Docling's layout and table models, downloaded once at build time (free, Hugging Face),
+# so preprocessing never downloads at runtime.
+ENV DOCLING_ARTIFACTS_PATH=/opt/docling-models
+RUN HF_HOME=/tmp/hf docling-tools models download layout tableformer -o /opt/docling-models \
+    && rm -rf /tmp/hf
 
 RUN useradd --create-home --uid 10001 opspilot \
     && mkdir -p /app/data/documents \

@@ -37,6 +37,11 @@ jobs:
       - name: Pango for WeasyPrint (PDF rendering tests)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
       - run: uv sync --frozen
+      - name: Cache Docling models (Hugging Face)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/huggingface
+          key: docling-models-${{ hashFiles('uv.lock') }}
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy
