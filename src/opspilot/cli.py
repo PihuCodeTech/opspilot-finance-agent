@@ -14,10 +14,16 @@ from types import FrameType
 
 import structlog
 
+from opspilot.audit.verify import verify as verify_audit
 from opspilot.config import get_settings
 from opspilot.db.roles import RoleProvisioningError, provision_roles
 from opspilot.db.seed import seed
-from opspilot.db.session import get_engine, get_owner_engine, get_scorer_engine
+from opspilot.db.session import (
+    get_engine,
+    get_owner_engine,
+    get_scorer_engine,
+    get_verifier_engine,
+)
 from opspilot.evaluation.archive import archive_bundle
 from opspilot.evaluation.datasets import DatasetError, freeze_dataset, load_bundle
 from opspilot.evaluation.generator.build import DEFAULT_SPECS, SplitSpec, generate
@@ -48,7 +54,6 @@ from opspilot.policy.retrieve import Embedder, active_version_id, index_policy, 
 log = structlog.get_logger()
 
 _PLANNED: dict[str, tuple[str, str]] = {
-    "audit": ("Verify audit chains and evidence digests", "P8"),
     "cleanup": ("Checkpoint retention and held-case re-check", "P9"),
     "eval": ("Run, score or rescore an evaluation", "P14"),
     "backup": ("Back up the database and documents volume", "P15+"),
@@ -317,6 +322,33 @@ def _add_data(sub: Subparsers) -> None:
     pre.set_defaults(handler=_preprocess)
 
 
+def _audit_verify(_args: argparse.Namespace) -> int:
+    """Exit 0 when every chain and digest checks out, 1 on any mismatch."""
+    engine = get_verifier_engine()
+    with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
+        report = verify_audit(conn)
+        conn.rollback()
+    lines = [
+        f"chain {c.chain_id}: {c.events} events, head seq {c.head_seq} {c.head_hash.hex()}"
+        f" [{'ok' if c.error is None else 'BROKEN at ' + c.error}]"
+        for c in report.chains
+    ] or ["no audit events yet"]
+    lines += [f"MISMATCH {m}" for m in report.mismatches]
+    lines.append(f"digests checked: {report.digests_checked}; mismatches: {len(report.mismatches)}")
+    lines.append("audit verify: " + ("OK" if report.ok else "FAILED"))
+    sys.stdout.write("\n".join(lines) + "\n")
+    return 0 if report.ok else 1
+
+
+def _add_audit(sub: Subparsers) -> None:
+    audit = sub.add_parser("audit", help="Audit chain and digest verification")
+    audit_sub = audit.add_subparsers(dest="audit_command", required=True)
+    verify_cmd = audit_sub.add_parser(
+        "verify", help="Recompute every chain and digest as the read-only verifier role"
+    )
+    verify_cmd.set_defaults(handler=_audit_verify)
+
+
 def _add_llm(sub: Subparsers) -> None:
     llm = sub.add_parser("llm", help="LLM utilities")
     llm_sub = llm.add_subparsers(dest="llm_command", required=True)
@@ -330,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     worker = sub.add_parser("worker", help="Run the background worker")
     worker.set_defaults(handler=_worker)
-    for add in (_add_policy, _add_admin, _add_data, _add_llm):
+    for add in (_add_policy, _add_admin, _add_data, _add_llm, _add_audit):
         add(sub)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")

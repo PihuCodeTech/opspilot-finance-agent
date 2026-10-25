@@ -249,6 +249,43 @@ def test_executed_action_needs_one_approve_decision_of_the_same_case(
     _fails(conn, sql, {"c": graph["case"], "d": graph["approve"]}, code=UNIQUE_VIOLATION)
 
 
+def test_reversals_and_acceptances_check_the_decision_kind(
+    conn: Connection, graph: dict[str, Any]
+) -> None:
+    """Regression (migration 0005): these tables have no case_id, and inserts used to fail."""
+    action = conn.execute(
+        text(
+            "INSERT INTO executed_actions (case_id, decision_id, action)"
+            " VALUES (:c, :d, 'place_on_hold') RETURNING id"
+        ),
+        {"c": graph["case"], "d": graph["approve"]},
+    ).scalar_one()
+    reversal = "INSERT INTO action_reversals (executed_action_id, decision_id) VALUES (:a, :d)"
+    _fails(conn, reversal, {"a": action, "d": graph["approve"]}, code=CHECK_VIOLATION)
+    reopen = f.decision(conn, graph["case"], "reopen", graph["approver"], reason="new evidence")
+    _succeeds(conn, reversal, {"a": action, "d": reopen})
+
+    resolution = conn.execute(
+        text(
+            "INSERT INTO finding_resolutions (finding_id, case_id, resolution_type, summary,"
+            " structured, resolved_by, policy_version_id, digest) VALUES (:f, :c,"
+            " 'credit_issued', 'credit note received', '{}'::jsonb, :u, :p, :d) RETURNING id"
+        ),
+        {
+            "f": graph["finding"],
+            "c": graph["case"],
+            "u": graph["analyst"],
+            "p": graph["policy_version"],
+            "d": b"\x00" * 32,
+        },
+    ).scalar_one()
+    acceptance = "INSERT INTO decision_resolution_acceptances VALUES (:d, :r, :g)"
+    _fails(
+        conn, acceptance, {"d": reopen, "r": resolution, "g": b"\x00" * 32}, code=CHECK_VIOLATION
+    )
+    _succeeds(conn, acceptance, {"d": graph["approve"], "r": resolution, "g": b"\x00" * 32})
+
+
 @pytest.mark.parametrize(
     "code", ["EXTRACTION_UNCERTAIN", "MISSING_OR_UNKNOWN_PO", "FORENSICS_SIGNAL"]
 )

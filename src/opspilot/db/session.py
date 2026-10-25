@@ -42,6 +42,15 @@ def get_scorer_engine() -> Engine:
     return create_engine(url.get_secret_value(), pool_pre_ping=True, pool_size=1, max_overflow=1)
 
 
+@lru_cache(maxsize=1)
+def get_verifier_engine() -> Engine:
+    """Read-only role for `audit verify`: recomputes chains and digests, can change nothing."""
+    url = get_settings().database_url_verifier
+    if url is None:
+        raise RuntimeError("DATABASE_URL_VERIFIER is not set")
+    return create_engine(url.get_secret_value(), pool_pre_ping=True, pool_size=1, max_overflow=1)
+
+
 @dataclass(frozen=True)
 class Readiness:
     database_ok: bool
