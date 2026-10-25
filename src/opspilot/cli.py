@@ -13,6 +13,7 @@ from pathlib import Path
 from types import FrameType
 
 import structlog
+from sqlalchemy import Engine
 
 from opspilot.audit.verify import verify as verify_audit
 from opspilot.config import get_settings
@@ -24,6 +25,7 @@ from opspilot.db.session import (
     get_scorer_engine,
     get_verifier_engine,
 )
+from opspilot.domain.enums import JobType
 from opspilot.evaluation.archive import archive_bundle
 from opspilot.evaluation.datasets import DatasetError, freeze_dataset, load_bundle
 from opspilot.evaluation.generator.build import DEFAULT_SPECS, SplitSpec, generate
@@ -43,6 +45,8 @@ from opspilot.extraction.preprocess import (
     pending_documents,
     preprocess_document,
 )
+from opspilot.jobs.queue import Job
+from opspilot.jobs.worker import Worker, cleanup
 from opspilot.llm.errors import LlmError
 from opspilot.llm.smoke import run_smoke
 from opspilot.logs import configure_logging
@@ -54,13 +58,10 @@ from opspilot.policy.retrieve import Embedder, active_version_id, index_policy, 
 log = structlog.get_logger()
 
 _PLANNED: dict[str, tuple[str, str]] = {
-    "cleanup": ("Checkpoint retention and held-case re-check", "P9"),
     "eval": ("Run, score or rescore an evaluation", "P14"),
     "backup": ("Back up the database and documents volume", "P15+"),
     "restore": ("Restore a backup", "P15+"),
 }
-
-_HEARTBEAT_SECONDS = 30.0
 
 
 def _not_implemented(name: str, phase: str) -> Callable[[argparse.Namespace], int]:
@@ -71,8 +72,12 @@ def _not_implemented(name: str, phase: str) -> Callable[[argparse.Namespace], in
     return run
 
 
+def _cleanup_handler(engine: Engine, _job: Job) -> None:
+    cleanup(engine, retention_days=get_settings().checkpoint_retention_days)
+
+
 def _worker(_args: argparse.Namespace) -> int:
-    """Idle worker loop until P9 adds the job queue; stops cleanly on SIGTERM/SIGINT."""
+    """Claim and run jobs until SIGTERM/SIGINT; the agent's job types arrive in P10."""
     stop = threading.Event()
 
     def _handle(signum: int, _frame: FrameType | None) -> None:
@@ -81,9 +86,18 @@ def _worker(_args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGTERM, _handle)
     signal.signal(signal.SIGINT, _handle)
-    log.info("worker.started", jobs="none until P9")
-    while not stop.wait(_HEARTBEAT_SECONDS):
-        log.info("worker.heartbeat")
+    worker = Worker(get_engine(), {JobType.CLEANUP: _cleanup_handler})
+    log.info("worker.started", job_types=sorted(worker.handlers))
+    worker.run(stop)
+    return 0
+
+
+def _cleanup(_args: argparse.Namespace) -> int:
+    report = cleanup(get_engine(), retention_days=get_settings().checkpoint_retention_days)
+    sys.stdout.write(
+        f"held cases released: {report.released}; checkpoint threads deleted:"
+        f" {report.threads_deleted}\n"
+    )
     return 0
 
 
@@ -362,6 +376,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     worker = sub.add_parser("worker", help="Run the background worker")
     worker.set_defaults(handler=_worker)
+    cleanup_cmd = sub.add_parser(
+        "cleanup", help="Release held cases that can now be approved; delete old checkpoints"
+    )
+    cleanup_cmd.set_defaults(handler=_cleanup)
     for add in (_add_policy, _add_admin, _add_data, _add_llm, _add_audit):
         add(sub)
     for name, (help_text, phase) in _PLANNED.items():

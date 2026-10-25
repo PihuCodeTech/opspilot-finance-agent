@@ -1,1 +1,1 @@
-"""Allowlist enforcement and simulated action executors (P9)."""
+"""Executing approved actions (simulated; gate layer 2)."""

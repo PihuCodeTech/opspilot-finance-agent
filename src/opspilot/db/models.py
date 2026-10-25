@@ -94,6 +94,17 @@ def now_column() -> Mapped[dt.datetime]:
     return mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+def ordered_now_column() -> Mapped[dt.datetime]:
+    """For rows whose order matters within one transaction (the latest one is "current").
+
+    `now()` is the transaction's start time, so two rows written in one
+    transaction tie; `clock_timestamp()` keeps their order (migration 0006).
+    """
+    return mapped_column(
+        DateTime(timezone=True), server_default=func.clock_timestamp(), nullable=False
+    )
+
+
 MONEY = Numeric(14, 2)
 UNIT_PRICE = Numeric(14, 4)
 QUANTITY = Numeric(12, 3)
@@ -609,7 +620,7 @@ class Proposal(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     policy_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("policy_versions.id"))
     digest: Mapped[bytes] = mapped_column(LargeBinary)
-    created_at: Mapped[dt.datetime] = now_column()
+    created_at: Mapped[dt.datetime] = ordered_now_column()
 
 
 class Decision(Base):
@@ -632,7 +643,7 @@ class Decision(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     details: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     case_version: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[dt.datetime] = now_column()
+    created_at: Mapped[dt.datetime] = ordered_now_column()
 
 
 class ExecutedAction(Base):
@@ -716,7 +727,7 @@ class FindingResolution(Base):
     resolved_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     policy_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("policy_versions.id"))
     digest: Mapped[bytes] = mapped_column(LargeBinary)
-    created_at: Mapped[dt.datetime] = now_column()
+    created_at: Mapped[dt.datetime] = ordered_now_column()
 
 
 class FindingResolutionEvidence(Base):

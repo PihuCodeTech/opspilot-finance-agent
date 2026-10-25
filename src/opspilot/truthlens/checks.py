@@ -119,6 +119,7 @@ def check_prices(facts: InvoiceFacts, ctx: ErpContext, policy: PolicyConfig) -> 
                 S.FAIL if variance > limit else S.PASS,
                 {
                     "invoice_unit_price": _s(line.unit_price),
+                    "invoice_quantity": _s(line.quantity),  # for credit-note resolutions
                     "po_unit_price": _s(po_line.unit_price),
                     "variance_pct": _s(variance),
                     "undercharge_info": variance < -info,
@@ -158,6 +159,7 @@ def check_quantities(
                 S.FAIL if cumulative > received else S.PASS,
                 {
                     "invoice_quantity": _s(line.quantity),
+                    "invoice_unit_price": _s(line.unit_price),  # for credit-note resolutions
                     "billed_before": _s(before),
                     "cumulative_billed": _s(cumulative),
                     "received": _s(received),
@@ -288,12 +290,17 @@ def check_duplicate(facts: InvoiceFacts, ctx: ErpContext, policy: PolicyConfig) 
         {
             "invoice_number": facts.number,
             "normalised": number,
+            # What a not-duplicate resolution's distinguishing fact is checked against.
+            "invoice_date": facts.invoice_date.isoformat(),
+            "invoice_po_number": facts.po_number,
             "matches": [
                 {
                     "ledger_invoice": ledger.number,
+                    "ledger_invoice_id": str(ledger.id) if ledger.id else None,
                     "basis": basis,
                     "total": _s(ledger.total),
                     "invoice_date": ledger.invoice_date.isoformat(),
+                    "same_lines": _line_set(facts.lines) == _line_set(ledger.lines),
                 }
                 for ledger, basis in matches
             ],
