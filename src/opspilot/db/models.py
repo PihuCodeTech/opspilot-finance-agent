@@ -798,6 +798,23 @@ class Job(Base):
     updated_at: Mapped[dt.datetime] = now_column()
 
 
+class LlmQuotaWindow(Base):
+    """Requests per provider, model and window: limits hold across restarts and workers."""
+
+    __tablename__ = "llm_quota_windows"
+    __table_args__ = (
+        PrimaryKeyConstraint("provider", "model", "window_kind", "window_start"),
+        CheckConstraint("window_kind IN ('minute', 'day')", name="window_kind"),
+        CheckConstraint("requests >= 0", name="non_negative"),
+    )
+
+    provider: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    window_kind: Mapped[str] = mapped_column(Text)
+    window_start: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    requests: Mapped[int] = mapped_column(Integer)
+
+
 class LlmCall(Base):
     __tablename__ = "llm_calls"
 

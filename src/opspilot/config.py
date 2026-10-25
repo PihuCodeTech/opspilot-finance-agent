@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     llm_mode: LlmMode = LlmMode.REPLAY
     llm_rpm: PositiveInt = 10
     llm_rpd: PositiveInt = 1000
+    llm_timeout_s: PositiveInt = 60
+    llm_max_attempts: PositiveInt = 4
     ollama_url: str | None = None
     ollama_model: str | None = None
 

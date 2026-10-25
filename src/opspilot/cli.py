@@ -37,6 +37,8 @@ from opspilot.extraction.preprocess import (
     pending_documents,
     preprocess_document,
 )
+from opspilot.llm.errors import LlmError
+from opspilot.llm.smoke import run_smoke
 from opspilot.logs import configure_logging
 from opspilot.policy.document import render_policy
 from opspilot.policy.loader import DEFAULT_POLICY_PATH, load_policy
@@ -196,6 +198,25 @@ def _preprocess(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _llm_smoke(args: argparse.Namespace) -> int:
+    """One live structured call with synthetic text; records it as a test fixture."""
+    try:
+        result, used_today = run_smoke(get_settings(), Path(args.fixtures))
+    except LlmError as exc:
+        sys.stderr.write(f"opspilot llm smoke: {type(exc).__name__}: {exc}\n")
+        return 1
+    call = result.calls[-1]
+    sys.stdout.write(
+        f"answer: {result.value.model_dump()}\n"
+        f"valid on first try: {result.first_try_valid}; calls: {len(result.calls)}\n"
+        f"tokens in/out: {call.response.tokens_in}/{call.response.tokens_out}; "
+        f"latency {call.latency_ms} ms; quota wait {call.quota_wait_ms} ms\n"
+        f"requests used today (this provider/model): {used_today}\n"
+        f"fixture: {args.fixtures}/{call.request_sha256}.json\n"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -247,6 +268,11 @@ def build_parser() -> argparse.ArgumentParser:
     pre.add_argument("--version", required=True, help="dataset version, e.g. g1-s1001")
     pre.add_argument("--limit", type=int, help="parse at most this many (for a quick check)")
     pre.set_defaults(handler=_preprocess)
+    llm = sub.add_parser("llm", help="LLM utilities")
+    llm_sub = llm.add_subparsers(dest="llm_command", required=True)
+    smoke = llm_sub.add_parser("smoke", help="One live call with synthetic text (uses quota)")
+    smoke.add_argument("--fixtures", default="tests/fixtures/llm")
+    smoke.set_defaults(handler=_llm_smoke)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))

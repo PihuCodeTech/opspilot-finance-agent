@@ -17,7 +17,7 @@ services:
       - "127.0.0.1:5432:5432"
 
   migrate:
-    build: .
+    image: opspilot:dev  # built by the app service: one image, never stale
     env_file: .env
     # Migrate as the owner, then enable the runtime roles' logins from .env.
     command: ["sh", "-c", "alembic upgrade head && opspilot db provision-roles"]
@@ -27,6 +27,7 @@ services:
 
   app:
     build: .
+    image: opspilot:dev
     env_file: .env
     depends_on:
       migrate:
@@ -42,7 +43,7 @@ services:
       retries: 5
 
   worker:
-    build: .
+    image: opspilot:dev
     env_file: .env
     command: ["opspilot", "worker"]
     depends_on:
@@ -55,7 +56,7 @@ services:
   # the bundles, which contain labels.json; app and worker never see labels (rules.md §2).
   # Usage: docker compose run --rm tools opspilot generate --split dev
   tools:
-    build: .
+    image: opspilot:dev
     profiles: ["tools"]
     env_file: .env
     user: root
@@ -66,6 +67,7 @@ services:
       - documents:/app/data/documents
       - ./data/datasets:/app/data/datasets
       - ./data/releases:/app/data/releases
+      - ./tests/fixtures/llm:/app/tests/fixtures/llm
 
 volumes:
   db-data:

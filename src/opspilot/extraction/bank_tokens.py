@@ -114,3 +114,8 @@ def _walk(value: Any, apply: Callable[[str], str]) -> Any:
     if isinstance(value, list):
         return [_walk(v, apply) for v in value]
     return value
+
+
+def contains_account_like_digits(value: str) -> bool:
+    """True if a 10+ digit run remains outside our own tokens (used before any LLM call)."""
+    return RESIDUAL.search(_TOKEN.sub("BANK_ACCT", value)) is not None
