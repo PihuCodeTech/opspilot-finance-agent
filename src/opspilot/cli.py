@@ -5,6 +5,7 @@ its own (see `.workflow/09-tasks.md`). Unimplemented commands exit with code 2.
 """
 
 import argparse
+import datetime as dt
 import signal
 import sys
 import threading
@@ -14,10 +15,12 @@ from types import FrameType
 
 import structlog
 from sqlalchemy import Engine
+from sqlalchemy import text as sql
 
 from opspilot.agent.runtime import build_agent, checkpoint_saver, run_slice
+from opspilot.audit.verify import record as record_verification
 from opspilot.audit.verify import verify as verify_audit
-from opspilot.config import get_settings
+from opspilot.config import LlmMode, get_settings
 from opspilot.db.roles import RoleProvisioningError, provision_roles
 from opspilot.db.seed import seed
 from opspilot.db.session import (
@@ -73,7 +76,29 @@ def _not_implemented(name: str, phase: str) -> Callable[[argparse.Namespace], in
     return run
 
 
-def _worker(_args: argparse.Namespace) -> int:
+class LiveRunNotAuthorizedError(RuntimeError):
+    pass
+
+
+def require_live_authorization(mode: LlmMode, allow_live: bool, command: str) -> None:
+    """Calls to a real provider (Gemini free tier) happen only when asked for, per command.
+
+    Replay is the zero-cost default for tests and routine work. A record or live run
+    needs both the mode in the environment and `--allow-live` on the command line.
+    """
+    if mode is not LlmMode.REPLAY and not allow_live:
+        raise LiveRunNotAuthorizedError(
+            f"LLM_MODE={mode} calls the provider; rerun `opspilot {command} --allow-live`"
+            " to authorise it (free tier, quota-limited), or set LLM_MODE=replay"
+        )
+
+
+def _refuse(exc: LiveRunNotAuthorizedError) -> int:
+    sys.stderr.write(f"refused: {exc}\n")
+    return 2
+
+
+def _worker(args: argparse.Namespace) -> int:
     """Claim and run jobs (investigate, resume, cleanup) until SIGTERM/SIGINT."""
     stop = threading.Event()
 
@@ -84,6 +109,10 @@ def _worker(_args: argparse.Namespace) -> int:
     signal.signal(signal.SIGTERM, _handle)
     signal.signal(signal.SIGINT, _handle)
     settings, engine = get_settings(), get_engine()
+    try:
+        require_live_authorization(settings.llm_mode, args.allow_live, "worker")
+    except LiveRunNotAuthorizedError as exc:
+        return _refuse(exc)
     agent = build_agent(settings, engine)
 
     def _cleanup_job(job_engine: Engine, _job: Job) -> None:
@@ -124,6 +153,10 @@ def _cleanup(_args: argparse.Namespace) -> int:
 def _agent_run(args: argparse.Namespace) -> int:
     """Investigate the first N invoices of a dev/adversarial/demo dataset as one eval run."""
     settings = get_settings()
+    try:
+        require_live_authorization(settings.llm_mode, args.allow_live, "agent run")
+    except LiveRunNotAuthorizedError as exc:
+        return _refuse(exc)
     agent = build_agent(settings, get_engine())
     eval_run_id, reports = run_slice(agent, args.dataset, args.version, args.limit)
     lines = [f"eval run {eval_run_id} ({settings.llm_mode}, {agent.deps.llm.provider.model})"]
@@ -263,6 +296,10 @@ def _preprocess(args: argparse.Namespace) -> int:
 def _llm_smoke(args: argparse.Namespace) -> int:
     """One live structured call with synthetic text; records it as a test fixture."""
     try:
+        require_live_authorization(LlmMode.RECORD, args.allow_live, "llm smoke")
+    except LiveRunNotAuthorizedError as exc:
+        return _refuse(exc)
+    try:
         result, used_today = run_smoke(get_settings(), Path(args.fixtures))
     except LlmError as exc:
         sys.stderr.write(f"opspilot llm smoke: {type(exc).__name__}: {exc}\n")
@@ -378,11 +415,25 @@ def _add_data(sub: Subparsers) -> None:
 
 
 def _audit_verify(_args: argparse.Namespace) -> int:
-    """Exit 0 when every chain and digest checks out, 1 on any mismatch."""
+    """Exit 0 when every chain and digest checks out, 1 on any mismatch.
+
+    The records are read as the read-only verifier role; the result is then
+    stored (append-only) by the app role, so the case page can show it.
+    """
     engine = get_verifier_engine()
+    started = dt.datetime.now(dt.UTC)
     with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
+        verified_as = str(conn.execute(sql("SELECT current_user")).scalar_one())
         report = verify_audit(conn)
         conn.rollback()
+    with get_engine().begin() as conn:
+        record_verification(
+            conn,
+            report,
+            started_at=started,
+            finished_at=dt.datetime.now(dt.UTC),
+            verified_as=verified_as,
+        )
     lines = [
         f"chain {c.chain_id}: {c.events} events, head seq {c.head_seq} {c.head_hash.hex()}"
         f" [{'ok' if c.error is None else 'BROKEN at ' + c.error}]"
@@ -390,9 +441,19 @@ def _audit_verify(_args: argparse.Namespace) -> int:
     ] or ["no audit events yet"]
     lines += [f"MISMATCH {m}" for m in report.mismatches]
     lines.append(f"digests checked: {report.digests_checked}; mismatches: {len(report.mismatches)}")
-    lines.append("audit verify: " + ("OK" if report.ok else "FAILED"))
+    lines.append(
+        "audit verify: "
+        + (
+            "OK (consistent as checked: tamper-evident, not proof that tampering is impossible)"
+            if report.ok
+            else "FAILED"
+        )
+    )
     sys.stdout.write("\n".join(lines) + "\n")
     return 0 if report.ok else 1
+
+
+LIVE_HELP = "authorise real provider calls when LLM_MODE is record or live (free tier)"
 
 
 def _add_audit(sub: Subparsers) -> None:
@@ -413,6 +474,7 @@ def _add_agent(sub: Subparsers) -> None:
     run.add_argument("--dataset", required=True, help="dataset name, e.g. dev")
     run.add_argument("--version", required=True, help="dataset version, e.g. g1-s1001")
     run.add_argument("--limit", type=int, default=5)
+    run.add_argument("--allow-live", action="store_true", help=LIVE_HELP)
     run.set_defaults(handler=_agent_run)
 
 
@@ -421,6 +483,7 @@ def _add_llm(sub: Subparsers) -> None:
     llm_sub = llm.add_subparsers(dest="llm_command", required=True)
     smoke = llm_sub.add_parser("smoke", help="One live call with synthetic text (uses quota)")
     smoke.add_argument("--fixtures", default="tests/fixtures/llm")
+    smoke.add_argument("--allow-live", action="store_true", help=LIVE_HELP)
     smoke.set_defaults(handler=_llm_smoke)
 
 
@@ -428,6 +491,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="opspilot", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     worker = sub.add_parser("worker", help="Run the background worker")
+    worker.add_argument("--allow-live", action="store_true", help=LIVE_HELP)
     worker.set_defaults(handler=_worker)
     cleanup_cmd = sub.add_parser(
         "cleanup", help="Release held cases that can now be approved; delete old checkpoints"

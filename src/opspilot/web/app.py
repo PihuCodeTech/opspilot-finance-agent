@@ -1,33 +1,52 @@
-"""FastAPI application: health endpoints and the base page shell.
+"""FastAPI application: health, sign-in, the JSON API and the HTML pages.
 
-No application features yet (Step 10); routes for cases, approvals and uploads
-arrive in P11.
+The app holds no business rules: routes call the case service and its query
+functions inside one transaction each (`web/db.py`). Tests can pass their own
+transaction factory (a savepoint they roll back) and a rate limiter.
 """
 
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from opspilot.config import get_settings
+from opspilot.config import Settings, get_settings
 from opspilot.db.session import check_readiness, get_engine
 from opspilot.logs import configure_logging
-from opspilot.web.middleware import RequestContextMiddleware
-from opspilot.web.theme import explicit_theme, views_3d_enabled
+from opspilot.web import errors
+from opspilot.web.db import TransactionFactory, engine_transactions
+from opspilot.web.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+from opspilot.web.ratelimit import RateLimiter
+from opspilot.web.routes import cases, documents, ui
 
 _WEB_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=_WEB_DIR / "templates")
+# Multipart framing and the form's text fields, on top of the largest file allowed.
+FORM_OVERHEAD_BYTES = 64 * 1024
 
 
-def create_app() -> FastAPI:
-    settings = get_settings()
+def create_app(
+    transactions: TransactionFactory | None = None,
+    *,
+    settings: Settings | None = None,
+    limiter: RateLimiter | None = None,
+) -> FastAPI:
+    settings = settings or get_settings()
     configure_logging(settings.log_level)
 
     app = FastAPI(title="OpsPilot", docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.settings = settings
+    app.state.templates = templates
+    app.state.limiter = limiter or RateLimiter()
+    app.state.transactions = transactions or engine_transactions(get_engine())
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(
+        BodySizeLimitMiddleware, max_bytes=settings.upload_max_bytes + FORM_OVERHEAD_BYTES
+    )
     app.mount("/static", StaticFiles(directory=_WEB_DIR / "static"), name="static")
+    errors.install(app)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -54,12 +73,7 @@ def create_app() -> FastAPI:
             },
         )
 
-    @app.get("/", response_class=HTMLResponse)
-    def index(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request,
-            "index.html",
-            {"theme": explicit_theme(request), "views_3d": views_3d_enabled(request)},
-        )
-
+    app.include_router(ui.router)
+    app.include_router(cases.router)
+    app.include_router(documents.router)
     return app

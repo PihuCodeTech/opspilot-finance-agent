@@ -16,9 +16,12 @@ dependencies = [
     "langgraph-checkpoint==4.2.0",
     "langgraph-checkpoint-postgres==3.1.2",
     "pgvector>=0.5.1",
+    "pillow==12.3.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
+    "pypdfium2==5.14.0",
+    "python-multipart==0.0.32",
     "sentence-transformers==6.1.0",
     "sqlalchemy>=2.1.6",
     "structlog>=26.1.0",
@@ -84,6 +87,11 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
+
+# pypdfium2 ships no type hints; it is used in two small modules (web/uploads, web/pages).
+[[tool.mypy.overrides]]
+module = ["pypdfium2", "pypdfium2.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true

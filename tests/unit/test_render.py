@@ -1,4 +1,10 @@
-"""Real PDF rendering; runs where WeasyPrint's system libraries exist (Docker, CI)."""
+"""Real PDF rendering; runs where WeasyPrint's system libraries exist (Docker, CI).
+
+Mandatory in CI (`CI` or `OPSPILOT_REQUIRE_RENDER` set): a missing library fails
+the run there instead of silently skipping. Only a developer machine may skip.
+"""
+
+import os
 
 import pytest
 
@@ -10,6 +16,8 @@ from opspilot.policy.loader import load_policy
 try:
     import weasyprint  # type: ignore[import-untyped]  # noqa: F401
 except OSError:  # Pango missing on this machine
+    if os.environ.get("CI") or os.environ.get("OPSPILOT_REQUIRE_RENDER"):
+        raise  # required here: never skip in CI
     pytest.skip("WeasyPrint system libraries are not installed", allow_module_level=True)
 
 

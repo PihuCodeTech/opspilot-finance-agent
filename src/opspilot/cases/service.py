@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlalchemy import Connection, func, insert, select, update
 
-from opspilot.audit.chain import append_event
+from opspilot.audit.chain import LIVE, append_event
 from opspilot.audit.digests import (
     cited_rows,
     proposal_digest,
@@ -27,6 +27,7 @@ from opspilot.cases.errors import (
     ConflictError,
     ForbiddenError,
     NotFoundError,
+    NotReadyError,
     ValidationFailedError,
 )
 from opspilot.cases.gate import require_action_allowed, require_payment_clear
@@ -45,6 +46,7 @@ from opspilot.db.models import (
     BankVerification,
     Case,
     CheckResult,
+    Dataset,
     Decision,
     DecisionResolutionAcceptance,
     Document,
@@ -53,6 +55,7 @@ from opspilot.db.models import (
     FindingResolution,
     FindingResolutionEvidence,
     InvestigationRun,
+    Invoice,
     PolicyVersion,
     Proposal,
     SupportingDocument,
@@ -63,6 +66,7 @@ from opspilot.domain.enums import (
     ApproverTier,
     CaseStatus,
     CheckCode,
+    DatasetSplit,
     DecisionKind,
     DocumentKind,
     JobType,
@@ -286,6 +290,28 @@ def create_case(
         idempotency_key=f"investigate:{case_id}:initial",
     )
     return case_id
+
+
+def create_upload_case(
+    conn: Connection, actor_id: uuid.UUID, document_id: uuid.UUID
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """T1 for an uploaded file: a new invoice in the `demo` dataset, then its case."""
+    _actor(conn, actor_id, UserRole.ANALYST)
+    dataset_id = conn.execute(
+        select(Dataset.id)
+        .where(Dataset.split == DatasetSplit.DEMO)
+        .order_by(Dataset.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if dataset_id is None:
+        raise NotReadyError("the demo dataset isn't loaded")
+    invoice_id = uuid.uuid4()
+    conn.execute(
+        insert(Invoice).values(
+            id=invoice_id, dataset_id=dataset_id, document_id=document_id, received_at=func.now()
+        )
+    )
+    return invoice_id, create_case(conn, actor_id, invoice_id)
 
 
 def create_eval_case(conn: Connection, eval_run_id: uuid.UUID, invoice_id: uuid.UUID) -> uuid.UUID:
@@ -923,3 +949,46 @@ def mark_closed_after_execution(
         {"decision_id": decision_id, "action": action},
         closed_at=func.now(),
     )
+
+
+READER_ROLES = frozenset({UserRole.ANALYST, UserRole.APPROVER, UserRole.AUDITOR})
+
+
+def record_document_download(
+    conn: Connection, actor_id: uuid.UUID, document_id: uuid.UUID, sha256: str
+) -> list[uuid.UUID]:
+    """An original left the system: one audit event on every live case holding the document.
+
+    Originals keep the printed bank number (they are the evidence), so each
+    download is attributable. No state changes and the case version stays put.
+    """
+    actor = load_actor(conn, actor_id)
+    if actor.role not in READER_ROLES:
+        raise ForbiddenError("this account can't read documents")
+    case_ids = sorted(
+        {
+            *conn.execute(
+                select(Case.id)
+                .join(Invoice, Invoice.id == Case.invoice_id)
+                .where(Invoice.document_id == document_id, Case.eval_run_id.is_(None))
+            ).scalars(),
+            *conn.execute(
+                select(SupportingDocument.case_id)
+                .join(Case, Case.id == SupportingDocument.case_id)
+                .where(SupportingDocument.document_id == document_id, Case.eval_run_id.is_(None))
+            ).scalars(),
+        },
+        key=str,
+    )
+    if not case_ids:
+        raise NotFoundError("document not found")
+    for case_id in case_ids:
+        append_event(
+            conn,
+            chain_id=LIVE,
+            event_type="document.downloaded",
+            payload={"document_id": document_id, "sha256": sha256},
+            actor_id=actor_id,
+            case_id=case_id,
+        )
+    return case_ids

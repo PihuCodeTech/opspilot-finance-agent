@@ -76,7 +76,11 @@ from opspilot.extraction.mapping import (
     facts_from,
     ground,
 )
-from opspilot.extraction.preprocess import PARSER_VERSION, preprocess_document
+from opspilot.extraction.preprocess import (
+    PARSER_VERSION,
+    UnsupportedDocumentError,
+    preprocess_document,
+)
 from opspilot.jobs.queue import Job
 from opspilot.jobs.worker import PauseJob
 from opspilot.llm.client import LlmResult
@@ -321,9 +325,14 @@ class Agent:
         if parsed is None:
             if self.deps.preprocessor is None:
                 raise RunFailure("document_not_parsed")
-            preprocess_document(
-                self.deps.engine, self.deps.preprocessor, document_id, self.deps.document_store
-            )
+            try:
+                preprocess_document(
+                    self.deps.engine, self.deps.preprocessor, document_id, self.deps.document_store
+                )
+            except UnsupportedDocumentError as exc:
+                # A scanned image: no text without OCR (P15), so nothing to read and nothing
+                # that may go to a model. The case fails with the reason (T5).
+                raise RunFailure(f"scanned_image_unsupported: {exc}") from exc
             with self.deps.engine.connect() as conn:
                 parsed = conn.execute(query).one()
         return parsed

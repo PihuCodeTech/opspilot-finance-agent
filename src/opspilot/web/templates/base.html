@@ -11,6 +11,20 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
+  {% if user %}
+  <header>
+    <nav aria-label="Main">
+      <a href="/">Cases</a>
+      {% if user.role == "approver" %}<a href="/approvals">Approvals</a>{% endif %}
+      {% if user.role == "analyst" %}<a href="/uploads/new">Upload</a>{% endif %}
+    </nav>
+    <p>{{ user.display_name }} ({{ user.role }})</p>
+    <form method="post" action="/auth/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Sign out</button>
+    </form>
+  </header>
+  {% endif %}
   <main id="main" class="canvas">
     {% block main %}{% endblock %}
   </main>

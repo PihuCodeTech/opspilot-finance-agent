@@ -785,6 +785,35 @@ class AuditEvent(Base):
     hash: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
 
 
+class AuditVerification(Base):
+    """One `opspilot audit verify` result (migration 0008); append-only.
+
+    Read-only verification runs as `opspilot_verifier`; the result is then recorded
+    by the app role, which may only insert. A clean result means the records were
+    consistent when checked: tamper-evident, never proof that tampering is impossible.
+    """
+
+    __tablename__ = "audit_verifications"
+    __table_args__ = (
+        CheckConstraint("ok = (chains_ok AND digests_ok)", name="ok_is_both"),
+        CheckConstraint("finished_at >= started_at", name="finished_after_start"),
+        Index("ix_audit_verifications_latest", sql_text("finished_at DESC")),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
+    verified_as: Mapped[str] = mapped_column(Text)  # the database role that read the records
+    ok: Mapped[bool] = mapped_column(Boolean)
+    chains_ok: Mapped[bool] = mapped_column(Boolean)
+    digests_ok: Mapped[bool] = mapped_column(Boolean)
+    # Per chain: chain_id, events, first_seq, head_seq, head_hash, error.
+    chains: Mapped[list[Any]] = mapped_column(JSONB)
+    digests_checked: Mapped[int] = mapped_column(Integer)
+    failures: Mapped[list[Any]] = mapped_column(JSONB)
+    created_at: Mapped[dt.datetime] = ordered_now_column()
+
+
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
@@ -906,6 +935,8 @@ def include_name(name: str | None, type_: str, _parent_names: object) -> bool:
     return not (type_ == "table" and name in EXTERNAL_TABLES)
 
 
+# Frozen: migration 0002 creates the append-only triggers from this exact list.
+# Tables added later list themselves in their own migration and in APPEND_ONLY_LATER.
 APPEND_ONLY_TABLES: tuple[str, ...] = (
     "audit_events",
     "decisions",
@@ -927,3 +958,7 @@ APPEND_ONLY_TABLES: tuple[str, ...] = (
     "decision_resolution_acceptances",
     "baseline_actions",
 )
+
+# Append-only tables created after migration 0002 (each by its own migration).
+APPEND_ONLY_LATER: tuple[str, ...] = ("audit_verifications",)
+ALL_APPEND_ONLY: tuple[str, ...] = APPEND_ONLY_TABLES + APPEND_ONLY_LATER

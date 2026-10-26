@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Cases · OpsPilot{% endblock %}
+{% block main %}
+  <h1>Cases</h1>
+  <form method="get" action="/">
+    <label for="status">Status</label>
+    <select id="status" name="status">
+      <option value="">All</option>
+      {% for s in statuses %}<option value="{{ s.value }}"{% if selected == s %} selected{% endif %}>{{ s.value }}</option>{% endfor %}
+    </select>
+    <button type="submit">Filter</button>
+  </form>
+  {% set empty = "No cases match." %}
+  {% set extra_query = "&status=" ~ selected.value if selected else "" %}
+  {% include "_case_rows.html" %}
+{% endblock %}

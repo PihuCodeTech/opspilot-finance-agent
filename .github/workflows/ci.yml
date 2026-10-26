@@ -27,6 +27,7 @@ jobs:
     env:
       APP_ENV: test
       LLM_MODE: replay
+      OPSPILOT_REQUIRE_RENDER: "1"  # the PDF-rendering test may not skip here
       DATABASE_URL: postgresql+psycopg://opspilot:ci-only-password@localhost:5432/opspilot_test
       TEST_DATABASE_URL: postgresql+psycopg://opspilot:ci-only-password@localhost:5432/opspilot_test
       SESSION_SECRET: ci-only-session-secret-not-used-anywhere-else-000

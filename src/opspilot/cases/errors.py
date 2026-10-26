@@ -43,3 +43,10 @@ class ValidationFailedError(ServiceError):
 
     status = 422
     code = "validation_failed"
+
+
+class NotReadyError(ServiceError):
+    """503: something the system needs (seed data, say) isn't there yet."""
+
+    status = 503
+    code = "not_ready"

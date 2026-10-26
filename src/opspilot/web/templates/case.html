@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Case · OpsPilot{% endblock %}
+{% macro hidden() %}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="expected_version" value="{{ case.version }}">
+{% endmacro %}
+{% block main %}
+  {% set inv = case.invoice.extracted or {} %}
+  <h1>Invoice {{ inv.invoice_number or "not read yet" }}</h1>
+  <dl>
+    <dt>Status</dt><dd>{{ case.status }}</dd>
+    <dt>Vendor</dt><dd>{{ case.vendor.name if case.vendor else (inv.vendor_name or "Not identified") }}</dd>
+    <dt>Total</dt><dd class="num">{{ inv.total or "—" }}</dd>
+    <dt>Bank account</dt><dd>{{ case.invoice.bank_account or "—" }}</dd>
+    {% if case.required_approval_amount is not none %}
+    <dt>Approval needed for</dt><dd class="num">{{ case.required_approval_amount }} ({{ case.required_approver_tier }})</dd>
+    {% endif %}
+    {% if case.latest_run and case.latest_run.failure_reason %}
+    <dt>Last run failed</dt><dd>{{ case.latest_run.failure_reason }}</dd>
+    {% endif %}
+  </dl>
+  <p><a href="/api/v1/documents/{{ case.invoice.document_id }}">Download the original invoice</a> (every download is recorded in the audit trail)</p>
+  {% if case.invoice.notice %}<p role="note"><strong>Not redacted.</strong> {{ case.invoice.notice }}</p>{% endif %}
+
+  <h2>Findings</h2>
+  {% for f in case.findings %}
+    <section aria-labelledby="finding-{{ f.id }}">
+      <h3 id="finding-{{ f.id }}">{{ f.exception_type }} · {{ f.subject_key }}</h3>
+      <p>{{ f.explanation }}</p>
+      {% for c in f.citations %}<blockquote><p>{{ c.quoted_text }}</p><footer>Policy {{ c.section_id }}, {{ c.title }}</footer></blockquote>{% endfor %}
+      {% if f.resolution %}
+        <p>Resolution: {{ f.resolution.resolution_type }}, {{ "valid" if f.resolution.valid else "no longer valid" }}. {{ f.resolution.summary }}</p>
+      {% elif f.needs_resolution and not f.resolvable_by_record %}
+        <p>Only a recheck can clear this finding.</p>
+      {% elif f.needs_resolution %}
+        <p>Unresolved.</p>
+      {% endif %}
+      {% if case.invoice.page_count and case.invoice.redaction_supported %}<p><a href="/api/v1/documents/{{ case.invoice.document_id }}/pages/1.png?highlight=finding:{{ f.id }}">Show on the invoice</a></p>{% endif %}
+    </section>
+  {% else %}
+    <p>{{ "No findings: every check passed." if case.evidence_run else "The investigation hasn't finished yet." }}</p>
+  {% endfor %}
+
+  {% if case.evidence_run %}
+  <h2>Checks</h2>
+  <table>
+    <thead><tr><th scope="col">Check</th><th scope="col">Subject</th><th scope="col">Result</th><th scope="col">Why inconclusive</th></tr></thead>
+    <tbody>
+    {% for c in case.evidence_run.checks %}
+      <tr><td>{{ c.check_code }}</td><td>{{ c.subject_key }}</td><td>{{ c.status }}</td><td>{{ c.inconclusive_reason or "" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Proposal</h2>
+  <p>{% if case.proposal %}{{ case.proposal.action }} (by {{ "the agent" if case.proposal.source == "agent" else case.proposal.changed_by.display_name }}){% else %}None yet.{% endif %}</p>
+
+  {% if case.supporting_documents %}
+  <h2>Supporting documents</h2>
+  <ul>{% for s in case.supporting_documents %}<li><a href="/api/v1/documents/{{ s.document_id }}">{{ s.kind }}</a>: {{ s.description }}{% if s.notice %} (scanned image, not redacted){% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if case.operations %}
+  <h2>What you can do</h2>
+  {% endif %}
+  {% if "investigate" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/investigate">{{ hidden() }}<button type="submit">Retry the investigation</button></form>
+  {% endif %}
+  {% if "change_proposal" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/proposal">
+    {{ hidden() }}
+    <fieldset><legend>Change the proposal</legend>
+      <label for="action">Action</label>
+      <select id="action" name="action">{% for a in case.allowed_actions %}<option value="{{ a.value }}">{{ a.value }}</option>{% endfor %}</select>
+      <label for="proposal-reason">Reason</label>
+      <input id="proposal-reason" name="reason" required maxlength="1000">
+      <button type="submit">Save the proposal</button>
+    </fieldset>
+  </form>
+  {% endif %}
+  {% if "submit" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/submit">{{ hidden() }}<button type="submit">Submit for approval</button></form>
+  {% endif %}
+  {% if "add_supporting_document" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/supporting-documents" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <fieldset><legend>Add a supporting document</legend>
+      <label for="kind">Kind</label>
+      <select id="kind" name="kind">{% for k in supporting_kinds %}<option value="{{ k.value }}">{{ k.value }}</option>{% endfor %}</select>
+      <label for="description">Description</label>
+      <input id="description" name="description" required maxlength="1000">
+      <label for="supporting-file">File</label>
+      <input id="supporting-file" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required>
+      <button type="submit">Attach the document</button>
+    </fieldset>
+  </form>
+  {% endif %}
+  {% if "recheck" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/recheck">
+    {{ hidden() }}
+    <fieldset><legend>Request a recheck</legend>
+      <label for="recheck-reason">Reason</label>
+      <input id="recheck-reason" name="reason" required maxlength="1000">
+      <label for="po-number">Corrected PO number (optional)</label>
+      <input id="po-number" name="po_number" maxlength="64">
+      <button type="submit">Recheck the invoice</button>
+    </fieldset>
+  </form>
+  {% endif %}
+  {% if "dismiss" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/dismiss">
+    {{ hidden() }}
+    <label for="dismiss-reason">Reason for closing without action</label>
+    <input id="dismiss-reason" name="reason" required maxlength="1000">
+    <button type="submit">Close the case</button>
+  </form>
+  {% endif %}
+  {% if "approve" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/approve">
+    {{ hidden() }}
+    <fieldset><legend>Approve {{ case.proposal.action if case.proposal else "" }}</legend>
+      {% for f in case.findings if f.resolution and f.needs_resolution %}
+        <p><input type="checkbox" id="accept-{{ f.resolution.id }}" name="accepted_resolution" value="{{ f.resolution.id }}:{{ f.resolution.digest }}" required>
+        <label for="accept-{{ f.resolution.id }}">I accept the {{ f.resolution.resolution_type }} resolution of {{ f.exception_type }}</label></p>
+      {% endfor %}
+      <button type="submit">Approve</button>
+    </fieldset>
+  </form>
+  {% elif case.blocked.approve %}
+  <p>You can't approve this case ({{ case.blocked.approve }}).</p>
+  {% endif %}
+  {% if "decline" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/decline">
+    {{ hidden() }}
+    <label for="decline-reason">Reason for declining</label>
+    <input id="decline-reason" name="reason" required maxlength="1000">
+    <button type="submit">Decline and return to the analyst</button>
+  </form>
+  {% endif %}
+  {% if "reopen" in case.operations %}
+  <form method="post" action="/cases/{{ case.id }}/reopen">
+    {{ hidden() }}
+    <label for="reopen-reason">Reason for reopening</label>
+    <input id="reopen-reason" name="reason" required maxlength="1000">
+    <button type="submit">Reverse the action and reopen</button>
+  </form>
+  {% endif %}
+
+  <h2>Decisions</h2>
+  <ol>{% for d in case.decisions %}<li>{{ d.kind }}{% if d.actor %} by {{ d.actor.display_name }}{% endif %}{% if d.reason %}: {{ d.reason }}{% endif %}</li>{% else %}<li>None yet.</li>{% endfor %}</ol>
+{% endblock %}

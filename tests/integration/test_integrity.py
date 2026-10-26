@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
-from opspilot.db.models import APPEND_ONLY_TABLES
+from opspilot.db.models import ALL_APPEND_ONLY
 from tests.integration import factories as f
 
 pytestmark = pytest.mark.integration
@@ -72,7 +72,7 @@ def test_every_append_only_table_has_both_triggers(conn: Connection) -> None:
         )
     ).all()
     names = {(table, trig) for table, trig in rows}
-    for table in APPEND_ONLY_TABLES:
+    for table in ALL_APPEND_ONLY:
         assert (table, f"{table}_append_only") in names, table
         assert (table, f"{table}_no_truncate") in names, table
 

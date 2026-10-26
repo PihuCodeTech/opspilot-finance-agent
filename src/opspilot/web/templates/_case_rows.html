@@ -1,0 +1,21 @@
+<table>
+  <thead>
+    <tr><th scope="col">Invoice</th><th scope="col">Vendor</th><th scope="col">Status</th><th scope="col">Findings</th><th scope="col">Proposed action</th><th scope="col" class="num">Total</th><th scope="col">Updated</th></tr>
+  </thead>
+  <tbody>
+  {% for c in cases.items %}
+    <tr>
+      <td><a href="/cases/{{ c.id }}">{{ c.invoice_number or "Not read yet" }}</a></td>
+      <td>{{ c.vendor.name if c.vendor else (c.vendor_name_read or "—") }}</td>
+      <td>{{ c.status }}</td>
+      <td>{{ c.finding_types | join(", ") or "—" }}</td>
+      <td>{{ c.proposed_action or "—" }}</td>
+      <td class="num">{{ c.total or "—" }}</td>
+      <td>{{ c.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7">{{ empty }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if cases.next_cursor %}<p><a href="?cursor={{ cases.next_cursor }}{{ extra_query or '' }}">Next page</a></p>{% endif %}

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Approvals · OpsPilot{% endblock %}
+{% block main %}
+  <h1>{{ "Held for an approver" if held else "Waiting for your approval" }}</h1>
+  <p><a href="/approvals{{ '' if held else '?held=true' }}">{{ "Show cases you can approve" if held else "Show held cases" }}</a></p>
+  {% set empty = "Nothing here." %}
+  {% set extra_query = "&held=true" if held else "" %}
+  {% include "_case_rows.html" %}
+{% endblock %}

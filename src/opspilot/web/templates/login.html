@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Sign in · OpsPilot{% endblock %}
+{% block main %}
+  <h1>Sign in to OpsPilot</h1>
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/auth/login">
+    <p><label for="username">Username</label><br>
+      <input id="username" name="username" autocomplete="username" required></p>
+    <p><label for="password">Password</label><br>
+      <input id="password" name="password" type="password" autocomplete="current-password" required></p>
+    <button type="submit">Sign in</button>
+  </form>
+{% endblock %}

@@ -10,12 +10,13 @@ whole chain consistently, so each chain's head hash is printed for recording
 elsewhere. Removing the newest events is only visible against such a record.
 """
 
+import datetime as dt
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, insert, select
 
 from opspilot.audit.chain import ZERO_HASH, event_content, event_hash
 from opspilot.audit.digests import (
@@ -32,6 +33,7 @@ from opspilot.audit.digests import (
 )
 from opspilot.db.models import (
     AuditEvent,
+    AuditVerification,
     Case,
     DecisionResolutionAcceptance,
     FindingResolution,
@@ -228,3 +230,43 @@ def verify(conn: Connection) -> VerifyReport:
     _verify_proposals(conn, carriers, report)
     _verify_resolutions(conn, carriers, report)
     return report
+
+
+def record(
+    conn: Connection,
+    report: VerifyReport,
+    *,
+    started_at: dt.datetime,
+    finished_at: dt.datetime,
+    verified_as: str,
+) -> uuid.UUID:
+    """Store one result (append-only), written by the app role after a read-only run."""
+    verification_id = uuid.uuid4()
+    conn.execute(
+        insert(AuditVerification).values(
+            id=verification_id,
+            started_at=started_at,
+            finished_at=finished_at,
+            verified_as=verified_as,
+            ok=report.ok,
+            chains_ok=report.chains_ok,
+            digests_ok=not report.mismatches,
+            chains=[
+                {
+                    "chain_id": c.chain_id,
+                    "events": c.events,
+                    "first_seq": 1 if c.events else 0,
+                    "head_seq": c.head_seq,
+                    "head_hash": c.head_hash.hex(),
+                    "error": c.error,
+                }
+                for c in report.chains
+            ],
+            digests_checked=report.digests_checked,
+            failures=[
+                *(f"chain {c.chain_id}: {c.error}" for c in report.chains if c.error),
+                *report.mismatches,
+            ],
+        )
+    )
+    return verification_id
