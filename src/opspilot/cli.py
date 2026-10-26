@@ -15,6 +15,7 @@ from types import FrameType
 import structlog
 from sqlalchemy import Engine
 
+from opspilot.agent.runtime import build_agent, checkpoint_saver, run_slice
 from opspilot.audit.verify import verify as verify_audit
 from opspilot.config import get_settings
 from opspilot.db.roles import RoleProvisioningError, provision_roles
@@ -72,12 +73,8 @@ def _not_implemented(name: str, phase: str) -> Callable[[argparse.Namespace], in
     return run
 
 
-def _cleanup_handler(engine: Engine, _job: Job) -> None:
-    cleanup(engine, retention_days=get_settings().checkpoint_retention_days)
-
-
 def _worker(_args: argparse.Namespace) -> int:
-    """Claim and run jobs until SIGTERM/SIGINT; the agent's job types arrive in P10."""
+    """Claim and run jobs (investigate, resume, cleanup) until SIGTERM/SIGINT."""
     stop = threading.Event()
 
     def _handle(signum: int, _frame: FrameType | None) -> None:
@@ -86,19 +83,63 @@ def _worker(_args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGTERM, _handle)
     signal.signal(signal.SIGINT, _handle)
-    worker = Worker(get_engine(), {JobType.CLEANUP: _cleanup_handler})
-    log.info("worker.started", job_types=sorted(worker.handlers))
+    settings, engine = get_settings(), get_engine()
+    agent = build_agent(settings, engine)
+
+    def _cleanup_job(job_engine: Engine, _job: Job) -> None:
+        cleanup(
+            job_engine,
+            retention_days=settings.checkpoint_retention_days,
+            delete_thread=agent.delete_thread,
+        )
+
+    worker = Worker(
+        engine,
+        {
+            JobType.INVESTIGATE: agent.investigate_job,
+            JobType.RESUME: agent.resume_job,
+            JobType.CLEANUP: _cleanup_job,
+        },
+    )
+    log.info("worker.started", job_types=sorted(worker.handlers), llm_mode=settings.llm_mode)
     worker.run(stop)
     return 0
 
 
 def _cleanup(_args: argparse.Namespace) -> int:
-    report = cleanup(get_engine(), retention_days=get_settings().checkpoint_retention_days)
+    settings = get_settings()
+    saver = checkpoint_saver(settings.database_url.get_secret_value())
+    report = cleanup(
+        get_engine(),
+        retention_days=settings.checkpoint_retention_days,
+        delete_thread=saver.delete_thread,
+    )
     sys.stdout.write(
         f"held cases released: {report.released}; checkpoint threads deleted:"
         f" {report.threads_deleted}\n"
     )
     return 0
+
+
+def _agent_run(args: argparse.Namespace) -> int:
+    """Investigate the first N invoices of a dev/adversarial/demo dataset as one eval run."""
+    settings = get_settings()
+    agent = build_agent(settings, get_engine())
+    eval_run_id, reports = run_slice(agent, args.dataset, args.version, args.limit)
+    lines = [f"eval run {eval_run_id} ({settings.llm_mode}, {agent.deps.llm.provider.model})"]
+    lines.append(
+        "invoice                               status            calls  tokens  wait_ms  s"
+    )
+    for r in reports:
+        lines.append(
+            f"{r.invoice_id}  {r.status:<16}  {r.llm_calls:>5}  {r.tokens_in + r.tokens_out:>6}"
+            f"  {r.quota_wait_ms:>7}  {r.seconds:>5}" + (f"  {r.failure}" if r.failure else "")
+        )
+    calls = [r.llm_calls for r in reports]
+    if calls:
+        lines.append(f"calls per invoice: mean {sum(calls) / len(calls):.2f}, max {max(calls)}")
+    sys.stdout.write("\n".join(lines) + "\n")
+    return 0 if all(r.failure is None for r in reports) else 1
 
 
 def _policy_build(args: argparse.Namespace) -> int:
@@ -363,6 +404,18 @@ def _add_audit(sub: Subparsers) -> None:
     verify_cmd.set_defaults(handler=_audit_verify)
 
 
+def _add_agent(sub: Subparsers) -> None:
+    agent = sub.add_parser("agent", help="Run the investigation agent")
+    agent_sub = agent.add_subparsers(dest="agent_command", required=True)
+    run = agent_sub.add_parser(
+        "run", help="Investigate a dataset slice as an evaluation run (uses quota when live)"
+    )
+    run.add_argument("--dataset", required=True, help="dataset name, e.g. dev")
+    run.add_argument("--version", required=True, help="dataset version, e.g. g1-s1001")
+    run.add_argument("--limit", type=int, default=5)
+    run.set_defaults(handler=_agent_run)
+
+
 def _add_llm(sub: Subparsers) -> None:
     llm = sub.add_parser("llm", help="LLM utilities")
     llm_sub = llm.add_subparsers(dest="llm_command", required=True)
@@ -380,7 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
         "cleanup", help="Release held cases that can now be approved; delete old checkpoints"
     )
     cleanup_cmd.set_defaults(handler=_cleanup)
-    for add in (_add_policy, _add_admin, _add_data, _add_llm, _add_audit):
+    for add in (_add_policy, _add_admin, _add_data, _add_llm, _add_audit, _add_agent):
         add(sub)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")

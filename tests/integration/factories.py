@@ -206,7 +206,9 @@ def supporting_document(
     )
 
 
-def audit_event(conn: Connection, chain: str = "live") -> int:
+def audit_event(conn: Connection, chain: str | None = None) -> int:
+    """A raw event on its own chain (the live chain may hold committed events)."""
+    chain = chain or f"test:{uuid.uuid4()}"
     value = conn.execute(
         text(
             "INSERT INTO audit_events (chain_id, seq, event_type, payload, prev_hash, hash)"

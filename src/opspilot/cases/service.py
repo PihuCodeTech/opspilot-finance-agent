@@ -288,6 +288,19 @@ def create_case(
     return case_id
 
 
+def create_eval_case(conn: Connection, eval_run_id: uuid.UUID, invoice_id: uuid.UUID) -> uuid.UUID:
+    """T1 for an evaluation run: system-created, on the run's own chain, never in the queue.
+
+    The evaluation runner drives the graph itself, item by item; evaluation cases
+    never appear in the live queue or API (`06-api.md` §4).
+    """
+    case_id = uuid.uuid4()
+    conn.execute(insert(Case).values(id=case_id, invoice_id=invoice_id, eval_run_id=eval_run_id))
+    case = lock_case(conn, case_id)
+    _audit(conn, case, "case.transition", None, {"transition": "T1", "from": None, "to": S.NEW})
+    return case_id
+
+
 def start_investigation(conn: Connection, case_id: uuid.UUID) -> uuid.UUID:
     """T2 (system, from the investigate job): a new run of kind `investigation`."""
     case = _open(conn, case_id, None, S.NEW)

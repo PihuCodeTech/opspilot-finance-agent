@@ -7,7 +7,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine, text
 
-from opspilot.db.models import Base
+from opspilot.db.models import Base, include_name
 from tests.integration.conftest import (
     _require_db,
     create_database,
@@ -54,7 +54,20 @@ def test_upgrade_downgrade_upgrade(fresh_url: str) -> None:
 def test_models_and_migrations_do_not_drift(migrated_url: str) -> None:
     engine = create_engine(migrated_url)
     with engine.connect() as conn:
-        context = MigrationContext.configure(conn, opts={"compare_server_default": True})
+        context = MigrationContext.configure(
+            conn, opts={"compare_server_default": True, "include_name": include_name}
+        )
         diff = compare_metadata(context, Base.metadata)
     engine.dispose()
     assert diff == []
+
+
+def test_checkpointer_schema_is_current(migrated_url: str) -> None:
+    """Migration 0007 applied the library's migrations; an upgrade adding one must fail here."""
+    from langgraph.checkpoint.postgres.base import MIGRATIONS  # noqa: PLC0415
+
+    engine = create_engine(migrated_url)
+    with engine.connect() as conn:
+        versions = conn.execute(text("SELECT max(v) FROM checkpoint_migrations")).scalar_one()
+    engine.dispose()
+    assert versions == len(MIGRATIONS) - 1

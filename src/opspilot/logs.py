@@ -28,15 +28,22 @@ _REDACTED_KEYS = frozenset(
         "verified_account_number",
     }
 )
-_LONG_DIGITS = re.compile(r"\d[\d \-]{6,}\d")
+# A whole UUID is tried first so its dash-joined digit groups are never read as one run.
+_UUID = r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+_LONG_DIGITS = re.compile(rf"{_UUID}|\d[\d \-]{{6,}}\d")
 # ISO dates and times are not account numbers and must stay readable in logs.
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def mask_digits(text: str) -> str:
-    """Replace runs of 8+ digits (spaces/dashes allowed) with •••• + last 4 digits."""
+    """Replace runs of 8+ digits (spaces/dashes allowed) with •••• + last 4 digits.
+
+    UUIDs (row and run IDs) and ISO dates are identifiers, not account numbers, and are kept.
+    """
 
     def _mask(match: re.Match[str]) -> str:
+        if "-" in match.group(0) and re.fullmatch(_UUID, match.group(0)):
+            return match.group(0)
         if _ISO_DATE.fullmatch(match.group(0)):
             return match.group(0)
         digits = re.sub(r"\D", "", match.group(0))

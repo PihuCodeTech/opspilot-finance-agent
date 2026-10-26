@@ -895,6 +895,17 @@ class BaselineAction(Base):
     created_at: Mapped[dt.datetime] = now_column()
 
 
+# Tables owned by a library (LangGraph's checkpointer, migration 0007), not by these models.
+EXTERNAL_TABLES = frozenset(
+    {"checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations"}
+)
+
+
+def include_name(name: str | None, type_: str, _parent_names: object) -> bool:
+    """Alembic filter: leave library-owned tables out of model comparisons."""
+    return not (type_ == "table" and name in EXTERNAL_TABLES)
+
+
 APPEND_ONLY_TABLES: tuple[str, ...] = (
     "audit_events",
     "decisions",

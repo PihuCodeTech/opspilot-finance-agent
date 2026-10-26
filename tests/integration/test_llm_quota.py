@@ -82,11 +82,17 @@ def test_concurrent_workers_never_exceed_the_day_limit(owner_engine: Engine) -> 
     assert (len(granted), len(refused)) == (7, 13)
 
 
+def _letters() -> str:
+    """Unique text with no digits: a random hex can hold ten digits in a row, which the
+    sensitive-data guard (correctly) refuses as a possible account number."""
+    return "".join(chr(ord("a") + int(c, 16)) for c in uuid.uuid4().hex)
+
+
 def test_live_calls_are_recorded_and_replayable(owner_engine: Engine) -> None:
     clock, model = FakeClock(), f"m-{uuid.uuid4().hex[:6]}"
     provider = FakeProvider([reply("recorded answer")], model=model)
     live = LlmClient(provider, LlmMode.LIVE, gate(owner_engine, clock, model, rpd=50), owner_engine)
-    req = LlmRequest("smoke", "sys", (Message("user", text=f"q {uuid.uuid4().hex}"),))
+    req = LlmRequest("smoke", "sys", (Message("user", text=f"q {_letters()}"),))
     result = live.generate(req)
 
     with owner_engine.connect() as conn:
