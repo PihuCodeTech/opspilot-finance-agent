@@ -278,13 +278,11 @@
   {# ------------------------------------------------ evidence: the match strip #}
   <section class="card" id="evidence" aria-labelledby="evidence-title">
     <div class="card-head"><h2 id="evidence-title">Evidence: line matching</h2>
-      {% if scenes.match_stack %}<div class="segmented" role="group" aria-label="Evidence view" data-evidence-view>
-        {% for view, label in [("table", "Table"), ("3d", "3D")] %}<a href="{{ evidence_views[view] }}" data-view="{{ view }}"{% if evidence_view == view %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
-      </div>{% else %}<span class="meta">PO · Received · Invoice</span>{% endif %}
+      {% if scenes.match_stack %}<a class="text-button" href="{{ evidence_toggle }}" role="button" aria-pressed="{{ 'true' if show_3d else 'false' }}" aria-controls="match-stack" data-evidence-3d>{{ "Hide 3D view" if show_3d else "Show 3D view" }}</a>{% else %}<span class="meta">PO · Received · Invoice</span>{% endif %}
     </div>
     {% if case.match_strip %}
-    {# The table stays first in the DOM and readable by screen readers in either view. #}
-    <div class="table-scroll{{ ' visually-hidden' if evidence_view == '3d' }}" data-evidence-table>
+    {# The table is the authoritative view and always shown; the 3D view is optional, below it. #}
+    <div class="table-scroll">
     <table class="evidence strip">
       <caption class="visually-hidden">Each invoice line against its PO line and what was received</caption>
       <thead><tr><th scope="col">Line</th><th scope="col">Description</th><th scope="col" class="num">PO qty × price</th><th scope="col" class="num">Received</th><th scope="col" class="num">Invoice qty × price</th><th scope="col" class="num">Line total</th><th scope="col">Match</th></tr></thead>
@@ -303,7 +301,7 @@
       </tbody>
     </table>
     </div>
-    {{ scene(scenes.match_stack, hidden=evidence_view != "3d") }}
+    {{ scene(scenes.match_stack, hidden=not show_3d) }}
     {% else %}
     <p class="subline">{{ "Line matching appears when the investigation finishes." if case.status in ("new", "investigating") else "No lines were matched." }}</p>
     {% endif %}
@@ -347,7 +345,8 @@
         <p class="subline">Run {{ trace.run.attempt }} ({{ trace.run.kind }}) · {{ trace.run.status }}{% if trace.run.model %} · {{ trace.run.model }}{% endif %}{% if trace.run.execution_ms is not none %} · {{ (trace.run.execution_ms / 1000) | round(1) }} s working{% endif %}{% if trace.run.quota_wait_ms %} · {{ (trace.run.quota_wait_ms / 1000) | round(1) }} s waiting for AI quota{% endif %}</p>
         {{ scene(scenes.pipeline) }}
         {% set check_counts = (trace.steps | selectattr("step", "equalto", "run_checks") | first).counts %}
-        <ol class="progress" aria-label="Steps, with when each wrote its record">{% for st in scenes.pipeline.payload.stations %}<li id="{{ st.target }}" class="{{ 'done' if st.done }}">{{ st.label }} · {% if st.at is not none %}{{ st.at }} s{% else %}<span class="subline">no record of its own</span>{% endif %}{% if st.key == "run_checks" and check_counts %} ({% for k, v in check_counts.items() %}{{ v }} {{ k }}{{ ", " if not loop.last }}{% endfor %}){% endif %}</li>{% endfor %}</ol>
+        <p class="subline">Times are when each step's record was written, counted from the start of the run. They are not step durations; steps that write no record of their own are untimed.</p>
+        <ol class="progress" aria-label="Steps, with when each wrote its record">{% for st in scenes.pipeline.payload.stations %}<li id="{{ st.target }}" class="{{ 'done' if st.done }}">{{ st.label }} · {% if st.at is not none %}recorded at +{{ st.at }} s{% else %}<span class="subline">untimed</span>{% endif %}{% if st.key == "run_checks" and check_counts %} ({% for k, v in check_counts.items() %}{{ v }} {{ k }}{{ ", " if not loop.last }}{% endfor %}){% endif %}</li>{% endfor %}</ol>
         {% if trace.llm_calls %}
         <table class="evidence">
           <caption class="visually-hidden">AI calls in this run</caption>
