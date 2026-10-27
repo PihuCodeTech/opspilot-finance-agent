@@ -1,0 +1,14 @@
+{# Audit chain, flat: events as linked blocks with their short hashes; verified links solid. #}
+{% set g = s.svg %}
+<svg viewBox="0 0 {{ g.w }} {{ g.h }}" class="sv" role="group" aria-label="{{ s.label }}">
+  {% for l in g.links %}<line class="sv-chainlink {{ l.state }}" x1="{{ l.x1 }}" y1="{{ l.y1 }}" x2="{{ l.x2 }}" y2="{{ l.y2 }}"/>{% endfor %}
+  {% for b in g.blocks %}
+  <a href="#{{ b.target }}" aria-label="Event {{ b.seq }}: {{ b.event }}, hash {{ b.hash }}, {{ b.state }}{% if b.seal %}, evidence digest {{ b.seal }}{% endif %}">
+    <rect class="sv-block {{ b.state }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ g.bw }}" height="{{ g.bh }}" rx="4"/>
+    <text class="sv-mono" x="{{ b.x + 8 }}" y="{{ b.y + 18 }}">{{ b.hash }}</text>
+    <text class="sv-small" x="{{ b.x + 8 }}" y="{{ b.y + 34 }}">{{ b.short }}</text>
+    {% if b.seal %}<circle class="sv-seal" cx="{{ b.x + g.bw - 9 }}" cy="{{ b.y + 9 }}" r="4"/>{% endif %}
+    {% if b.state == "broken" %}<text class="sv-break-text fail" x="{{ b.x + g.bw - 14 }}" y="{{ b.y + 36 }}">×</text>{% endif %}
+  </a>
+  {% endfor %}
+</svg>
