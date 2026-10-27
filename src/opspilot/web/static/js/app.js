@@ -90,23 +90,18 @@
   window.addEventListener("hashchange", openTarget);
   openTarget();
 
-  // Evidence: Table / 3D (07-design.md §7, §11.2). Without script the links reload the page
-  // in that view; the table stays in the DOM, readable by screen readers, either way.
-  for (const control of document.querySelectorAll("[data-evidence-view]")) {
-    control.addEventListener("click", (event) => {
-      const link = event.target.closest("a[data-view]");
-      if (!link) return;
+  // Evidence: an optional 3D view below the table (owner decision, P13). The table is the
+  // default and authoritative view and never changes; without script the link reloads.
+  for (const toggle of document.querySelectorAll("[data-evidence-3d]")) {
+    toggle.addEventListener("click", (event) => {
+      const figure = document.getElementById(toggle.getAttribute("aria-controls"));
+      if (!figure) return;
       event.preventDefault();
-      const section = control.closest("section");
-      const three = link.dataset.view === "3d";
-      section.querySelector("[data-evidence-table]")?.classList.toggle("visually-hidden", three);
-      const figure = section.querySelector("figure[data-scene]");
-      if (figure) figure.hidden = !three;
-      for (const a of control.querySelectorAll("a[data-view]")) {
-        if (a === link) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
-      }
-      history.replaceState(null, "", link.href);
-      if (three) start3d();
+      const show = figure.hidden;
+      figure.hidden = !show;
+      toggle.setAttribute("aria-pressed", String(show));
+      toggle.textContent = show ? "Hide 3D view" : "Show 3D view";
+      if (show) start3d();
     });
   }
 
