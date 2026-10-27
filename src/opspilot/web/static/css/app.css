@@ -243,7 +243,7 @@ legend { padding: 0; font-weight: 500; margin-bottom: 8px; }
 .signin { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 520px) minmax(0, 1fr); }
 .signin .panel { padding: 56px 48px; display: flex; flex-direction: column; gap: 20px; }
 .signin .art { border-left: 1px solid var(--rule); display: flex; align-items: center; justify-content: center; padding: 48px; }
-.signin .art svg { width: 100%; max-width: 520px; height: auto; color: var(--text); }
+.signin .art .scene { width: 100%; max-width: 520px; margin: 0; }
 .signin form { display: flex; flex-direction: column; gap: 4px; max-width: 360px; }
 .signin .tools { position: absolute; top: 16px; right: 16px; }
 .demo-users { border-collapse: collapse; }
@@ -271,6 +271,9 @@ legend { padding: 0; font-weight: 500; margin-bottom: 8px; }
   .case-grid { grid-template-columns: minmax(0, 1fr); }
   .decision { position: static; order: -1; }
   .canvas { padding-top: 24px; }
+  /* the sign-in hero needs the right half; squeezed, it would only crowd the form */
+  .signin { grid-template-columns: minmax(0, 1fr); }
+  .signin .art { display: none; }
 }
 
 /* ---------- phone: two-line rows, 16px margins ---------- */
@@ -289,15 +292,10 @@ legend { padding: 0; font-weight: 500; margin-bottom: 8px; }
   table.data.responsive td.action-col { text-align: left; padding-top: 6px; }
   .table-scroll { overflow-x: auto; position: relative; }
   table.evidence td.num { white-space: normal; overflow-wrap: anywhere; }
-  .signin { grid-template-columns: minmax(0, 1fr); }
-  .signin .art { display: none; }
   .signin .panel { padding: 32px 16px; }
   .button, .icon-button { min-height: 44px; }
 }
 
-/* sign-in art: ink structure, the data hue on the invoice plane's break */
-.art-break { stroke: var(--negative); }
-.art-label { fill: var(--muted); font-size: var(--fs-small); font-family: var(--font); }
 
 /* review round 1 */
 .scope .meta { color: var(--muted); font-size: var(--fs-small); }
@@ -311,3 +309,81 @@ blockquote.well { margin: 0; }
 .checks-line svg, .checklist svg, .pill svg { display: inline; vertical-align: -1px; }
 .signin .tools .menu-panel { top: 36px; bottom: auto; left: auto; right: 0; }
 @media (max-width: 1099px) { .table-frame { overflow-x: auto; } }
+
+/* ---------- 3D scenes (07-design.md §11): the 2D fallback holds the size; the canvas covers it ---------- */
+.scene { position: relative; margin: 12px 0; }
+.scene[hidden] { display: none; }
+.scene-fallback { overflow-x: auto; }
+.scene-fallback > svg { display: block; width: 100%; height: auto; min-width: 560px; }
+.scene-stage { display: none; position: absolute; inset: 0; }
+.scene.is-live .scene-stage { display: block; }
+.scene.is-live .scene-fallback { visibility: hidden; }
+.scene-stage canvas { display: block; width: 100%; height: 100%; border-radius: var(--radius-control); }
+.scene-stage canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.scene-stage canvas.pointing { cursor: pointer; }
+.scene-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.scene-label { position: absolute; left: 0; top: 0; padding: 0 3px; font-size: var(--fs-small); line-height: 16px; color: var(--muted); white-space: nowrap; }
+.scene-label.strong, .scene-label.focus { color: var(--text); font-weight: 500; }
+.scene-label.data { color: var(--data); font-weight: 500; }
+.scene-label.breaks { color: var(--negative); }
+.scene-label.mono { font-family: var(--font-mono); }
+.scene-label.on-focus:not(.focus) { visibility: hidden; }
+.scene-label.focus { background: var(--surface); border-radius: var(--radius-chip); outline: 1px solid var(--border); }
+
+/* what a scene points at in the HTML */
+.scene-selected, .scene-marked { background: var(--active); border-radius: var(--radius-chip); }
+tr.scene-selected td, tr.scene-selected th, tr.scene-marked td, tr.scene-marked th { background: var(--active); }
+
+/* Table / 3D switch in the evidence header */
+.segmented { display: inline-flex; border: 1px solid var(--control); border-radius: var(--radius-control); overflow: hidden; }
+.segmented a { padding: 4px 12px; font-size: var(--fs-small); color: var(--muted); text-decoration: none; min-height: 28px; display: inline-flex; align-items: center; }
+.segmented a + a { border-left: 1px solid var(--control); }
+.segmented a[aria-current="true"] { background: var(--active); color: var(--text); font-weight: 500; }
+
+/* desk overview: 160px, full width; the fallback is a bar per pile on the same scale */
+.scene-desk .scene-fallback { height: 160px; overflow: visible; }
+.desk-bars { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 100%; }
+.desk-bars a, .desk-bars .row { display: grid; grid-template-columns: minmax(96px, 200px) minmax(0, 1fr) 4ch; align-items: center; gap: 12px; color: var(--muted); text-decoration: none; min-height: 24px; border-radius: var(--radius-chip); padding: 0 4px; }
+.desk-bars a:hover { background: var(--raised); }
+.desk-bars a[aria-current="true"] { color: var(--text); font-weight: 500; }
+.desk-bars .bar { width: 100%; height: 8px; display: block; }
+.desk-bars .bar rect { fill: var(--compare); }
+.desk-bars .ink .bar rect { fill: var(--text); }
+.desk-bars .ink a, .desk-bars .ink .row { color: var(--text); }
+.desk-bars .count { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* the flat drawings: ink and grey structure, the data hue for the invoice, red for a break */
+.sv text { font-family: var(--font); font-size: 12px; fill: var(--muted); }
+.sv .sv-small { font-size: 11px; }
+.sv .sv-mono { font-family: var(--font-mono); font-size: 11px; fill: var(--text); }
+.sv .sv-text, .sv .sv-label { fill: var(--text); }
+.sv a:focus-visible { outline: 2px solid var(--focus); }
+.sv a:hover .sv-thread, .sv a:focus .sv-thread { stroke: var(--text); }
+.sv-plane { fill: var(--surface); stroke: var(--compare); stroke-width: 1; }
+.sv-plane.front { stroke: var(--text); }
+.sv-thread { fill: none; stroke: var(--compare); stroke-width: 1.5; }
+.sv-break { stroke: var(--negative); stroke-width: 3; stroke-dasharray: 6 4; fill: none; }
+.sv-break.inconclusive { stroke: var(--warning); }
+.sv .sv-break-text { fill: var(--negative); font-weight: 500; }
+.sv .sv-break-text.inconclusive { fill: var(--warning); }
+.sv-card { fill: var(--surface); stroke: var(--compare); }
+.sv-card.front { stroke: var(--text); }
+.sv-link { fill: none; stroke: var(--compare); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.sv-chain.accepted .sv-link { stroke: var(--text); stroke-dasharray: none; }
+.sv-track { stroke: var(--compare); stroke-width: 3; }
+.sv-hatch { stroke: var(--compare); stroke-width: 2; }
+.sv-wait { stroke: var(--compare); }
+.sv-marker { stroke: var(--muted); stroke-width: 2; }
+.sv-station { fill: var(--surface); stroke: var(--compare); stroke-width: 2; }
+.sv-station.done { fill: var(--text); stroke: var(--text); }
+.sv-station.current { fill: var(--data); stroke: var(--data); }
+.sv .sv-small.current { fill: var(--data); font-weight: 500; }
+.sv-block { fill: var(--surface); stroke: var(--compare); stroke-dasharray: 4 3; }
+.sv-block.verified { stroke: var(--text); stroke-dasharray: none; }
+.sv-block.broken { stroke: var(--negative); stroke-width: 2; stroke-dasharray: none; }
+.sv-chainlink { stroke: var(--compare); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.sv-chainlink.verified { stroke: var(--text); stroke-dasharray: none; }
+.sv-chainlink.broken { stroke: var(--negative); stroke-width: 2; stroke-dasharray: 2 6; }
+.sv-seal { fill: var(--data); }
+.sv-sheet { fill: var(--surface); stroke: var(--compare); }
+.sv-sheet.forward { stroke: var(--text); stroke-width: 2; }
