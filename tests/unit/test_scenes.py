@@ -139,11 +139,16 @@ def test_desk_piles_share_one_scale_and_ink_marks_the_viewers_work() -> None:
 
 
 def test_approvals_desk_has_no_link_to_a_list_the_approver_cannot_see() -> None:
-    scene = desk_approvals({"mine": 2, "others": 1, "held": 0}, unlimited=False, held=False)
+    scene = desk_approvals({"mine": 2, "others": 1, "held": 3}, unlimited=False, held=False)
     assert scene is not None
-    others = scene.payload["piles"][1]
+    mine, others, held = scene.payload["piles"]
+    assert mine["href"] == "/approvals" and mine["ink"]
+    # Only what this approver can act on links anywhere.
     assert others["label"] == "Needs a controller" and others["href"] is None
-    assert [p["id"] for p in scene.payload["piles"]] == ["pile-mine", "pile-others"]
+    assert held["href"] is None and not held["ink"]
+    assert render(scene).split('class="desk-bars"')[1].count("<a ") == 1
+    empty = desk_approvals({"mine": 2, "others": 0, "held": 0}, unlimited=False, held=False)
+    assert empty is not None and [p["id"] for p in empty.payload["piles"]] == ["pile-mine"]
 
 
 def test_resolution_links_point_at_the_html_checkboxes() -> None:
@@ -203,6 +208,8 @@ def test_pipeline_stations_follow_the_records_in_order_with_waits_and_calls() ->
     assert positions == sorted(positions) and positions[0] == 0.0 and positions[-1] == 1.0
     assert all(b - a >= MIN_GAP / 2 for a, b in itertools.pairwise(positions))
     assert stations["investigate"]["at"] == 20.0 and stations["validate"]["at"] is None
+    # Recorded times, never durations; untimed steps say so and get no estimate.
+    assert "Investigate recorded at +20.0 s" in scene.label and "3 untimed" in scene.label
     assert all(s["done"] for s in stations.values())
     (wait,) = scene.payload["waits"]
     assert wait["seconds"] == 8.0 and wait["from"] < wait["to"] <= stations["investigate"]["p"]
