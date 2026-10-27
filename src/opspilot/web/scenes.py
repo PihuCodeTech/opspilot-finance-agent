@@ -269,8 +269,8 @@ def desk_queue(counts: dict[str, int], role: str, current: str | None) -> Scene 
 def desk_approvals(counts: dict[str, Any], unlimited: bool, held: bool) -> Scene | None:
     """What waits for this approver, what needs someone else, and what is held.
 
-    The approvals list only holds cases this approver may approve, so the middle pile
-    has no list to filter to (`07-design.md` §11.2 asks for one pile per tier [A]).
+    Only the pile this approver can act on links anywhere; the others are counts
+    (owner decision, P13: the controller pile must not suggest this approver can approve).
     """
     piles = [
         {
@@ -294,7 +294,7 @@ def desk_approvals(counts: dict[str, Any], unlimited: bool, held: bool) -> Scene
             "label": "Held: no approver",
             "count": counts.get("held", 0),
             "ink": False,
-            "href": "/approvals?status=held_for_approver",
+            "href": None,  # held cases wait for an approver with authority: nothing to act on
             "current": held,
         },
     ]
@@ -482,11 +482,11 @@ def pipeline_track(trace: dict[str, Any], timeline: dict[str, dt.datetime | None
                 )
     timed = [s for s in stations if s["at"] is not None]
     label = (
-        f"Pipeline track: {len(stations)} steps over {round(total, 1)} s"
+        f"Pipeline track: {len(stations)} steps, records written over {round(total, 1)} s"
         + (f", {sum(w['seconds'] for w in waits):.1f} s waiting for AI quota" if waits else "")
         + f", {_plural(len(markers), 'AI call')}. "
-        + "; ".join(f"{s['label']} at {s['at']} s" for s in timed)
-        + "."
+        + "; ".join(f"{s['label']} recorded at +{s['at']} s" for s in timed)
+        + (f"; {len(stations) - len(timed)} untimed." if len(timed) < len(stations) else ".")
     )
     payload = {"live": False, "stations": stations, "waits": waits, "markers": markers}
     return Scene("pipeline", "pipeline", label, payload, _pipeline_svg(payload))
