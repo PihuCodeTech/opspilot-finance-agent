@@ -1,0 +1,20 @@
+{# Resolution chain, flat: finding → resolution → evidence; links dashed until the resolution is accepted. #}
+{% set g = s.svg %}
+<svg viewBox="0 0 {{ g.w }} {{ g.h }}" class="sv" role="group" aria-label="{{ s.label }}">
+  {% for r in g.rows %}
+  <g class="sv-chain" data-accept-link="{{ r.accept }}">
+    <a href="#{{ r.accept }}" aria-label="{{ r.finding }}: {{ r.resolution }}, evidence {{ r.evidence | join(', ') }}">
+      <rect class="sv-card front" x="4" y="{{ r.y }}" width="176" height="28" rx="4"/>
+      <text class="sv-text" x="12" y="{{ r.y + 18 }}">{{ r.finding_short }}</text>
+    </a>
+    <line class="sv-link" x1="180" y1="{{ r.mid }}" x2="230" y2="{{ r.mid }}"/>
+    <rect class="sv-card" x="230" y="{{ r.y }}" width="176" height="28" rx="4"/>
+    <text class="sv-text" x="238" y="{{ r.y + 18 }}">{{ r.resolution_short }}</text>
+    {% for e in r.evidence_rows %}
+    <path class="sv-link" d="M406 {{ r.mid }} C 433 {{ r.mid }}, 433 {{ e.mid }}, 460 {{ e.mid }}"/>
+    <rect class="sv-card" x="460" y="{{ e.y }}" width="176" height="28" rx="4"/>
+    <text class="sv-text" x="468" y="{{ e.y + 18 }}">{{ e.text }}</text>
+    {% endfor %}
+  </g>
+  {% endfor %}
+</svg>

@@ -1079,6 +1079,8 @@ def _verification(conn: Connection, case_id: uuid.UUID) -> dict[str, Any] | None
     )
     ids = _case_record_ids(conn, case_id) | {f"live seq {n} " for n in seqs}
     mine = [f for f in latest.failures if any(i in f + " " for i in ids)]
+    named = re.match(r"seq (\d+):", (live or {}).get("error") or "")
+    broken = int(named.group(1)) if named else None
     summary: dict[str, Any] = mask_bank(
         conn,
         {
@@ -1086,6 +1088,8 @@ def _verification(conn: Connection, case_id: uuid.UUID) -> dict[str, Any] | None
             "verified_at": latest.finished_at,
             "verified_as": latest.verified_as,
             "chain_ok": live is not None and live["error"] is None,
+            # The event the chain breaks at, when it is one of this case's (the audit chain view).
+            "broken_seq": broken if broken in seqs else None,
             "evidence_ok": not mine,
             "overall_ok": latest.ok,
             "verified_through_seq": through,
@@ -1209,6 +1213,32 @@ def run_trace(
     }
     masked: dict[str, Any] = mask_bank(conn, trace)
     return masked
+
+
+def run_timeline(
+    conn: Connection, actor: Actor, case_id: uuid.UUID, run_id: uuid.UUID
+) -> dict[str, dt.datetime | None]:
+    """When each step of one run wrote its first record, for the pipeline track (P13).
+
+    Steps that write nothing of their own (loading, resolving records, validating)
+    and line matches (no timestamp) aren't here: the track shows them untimed.
+    """
+    require_reader(actor)
+    require_live_case(conn, case_id)
+
+    def first(model: Any) -> dt.datetime | None:
+        moment: dt.datetime | None = conn.execute(
+            select(func.min(model.created_at)).where(model.run_id == run_id)
+        ).scalar()
+        return moment
+
+    return {
+        "extract": first(Extraction),
+        "run_checks": first(CheckResult),
+        "persist_findings": min(
+            (t for t in (first(Finding), first(Proposal)) if t is not None), default=None
+        ),
+    }
 
 
 # ---------------------------------------------------------------- documents

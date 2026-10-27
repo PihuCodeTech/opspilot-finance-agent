@@ -114,7 +114,7 @@ def test_j1_analyst_investigates_a_flagged_invoice(
         files=[FilePayload(name="cn.pdf", mimeType="application/pdf", buffer=pdf)]
     )
     page.get_by_role("button", name="Attach document").click()
-    expect(page.get_by_role("link", name=re.compile("Credit note"))).to_be_visible()
+    expect(page.get_by_role("link", name="Credit note", exact=True)).to_be_visible()  # its download
 
     finding = page.locator("article.finding").first
     finding.get_by_text("Resolve", exact=True).click()

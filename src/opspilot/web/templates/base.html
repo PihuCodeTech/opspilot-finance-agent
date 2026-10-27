@@ -1,6 +1,6 @@
 {% from "_ui.html" import icon, mark, nav, prefs with context %}
 <!doctype html>
-<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %} data-views3d="{{ 'on' if views_3d else 'off' }}">
+<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %} data-views3d="{{ 'on' if views_3d else 'off' }}"{% if views_3d_explicit %} data-views3d-explicit="on"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

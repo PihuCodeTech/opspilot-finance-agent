@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/scene.html" import scene %}
 {% block title %}Cases · OpsPilot{% endblock %}
 {% block main %}
 {% set parts = [] %}
@@ -44,6 +45,7 @@
   {% if filters %}<a class="text-button" href="/">Clear filters</a>{% endif %}
   <span class="result-count">{{ cases.total }} {{ "case" if cases.total == 1 else "cases" }} · oldest first</span>
 </form>
+{% if desk %}{{ scene(desk) }}{% endif %}
 {% set mode = "cases" %}{% set held = False %}
 {% set caption = "Cases, oldest first" %}
 {% set empty = ("No cases match these filters." if filters else "No cases yet. New uploads appear here.") %}

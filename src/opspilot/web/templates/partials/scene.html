@@ -1,0 +1,16 @@
+{# A 3D scene (07-design.md §11): its data for the three.js view, and the same data drawn
+   server-side as the 2D fallback. The fallback holds the scene's size, so the canvas that
+   replaces it can't shift the layout; the stage hides it once the canvas has drawn. #}
+{% macro scene(s, hidden=False) -%}
+<figure class="scene scene-{{ s.kind | replace('_', '-') }}" id="{{ s.id }}" data-scene="{{ s.kind }}"{% if s.decorative %} data-decorative="true" aria-hidden="true"{% endif %}{% if hidden %} hidden{% endif %}>
+  <script type="application/json" id="{{ s.id }}-data" data-scene-payload>{{ s.data() | tojson }}</script>
+  <div class="scene-fallback" id="{{ s.id }}-fallback">{% include "partials/fallback_" ~ s.kind ~ ".html" %}</div>
+  <div class="scene-stage"></div>
+</figure>
+{%- endmacro %}
+
+{# The same scene's data and fallback as htmx out-of-band swaps: the figure and its canvas stay. #}
+{% macro scene_oob(s) -%}
+<script type="application/json" id="{{ s.id }}-data" data-scene-payload hx-swap-oob="true">{{ s.data() | tojson }}</script>
+<div class="scene-fallback" id="{{ s.id }}-fallback" hx-swap-oob="true">{% include "partials/fallback_" ~ s.kind ~ ".html" %}</div>
+{%- endmacro %}

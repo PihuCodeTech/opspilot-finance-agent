@@ -37,6 +37,10 @@
     const progress = form.querySelector("[data-review-progress]");
     if (!boxes.length || !button) continue;
     const update = () => {
+      // The resolution chain's 2D fallback: a link turns solid once its resolution is accepted.
+      for (const box of boxes) {
+        for (const link of document.querySelectorAll(`[data-accept-link="${box.id}"]`)) link.classList.toggle("accepted", box.checked);
+      }
       const done = boxes.filter((b) => b.checked).length;
       const all = done === boxes.length;
       button.disabled = !all;
@@ -85,6 +89,38 @@
   };
   window.addEventListener("hashchange", openTarget);
   openTarget();
+
+  // Evidence: an optional 3D view below the table (owner decision, P13). The table is the
+  // default and authoritative view and never changes; without script the link reloads.
+  for (const toggle of document.querySelectorAll("[data-evidence-3d]")) {
+    toggle.addEventListener("click", (event) => {
+      const figure = document.getElementById(toggle.getAttribute("aria-controls"));
+      if (!figure) return;
+      event.preventDefault();
+      const show = figure.hidden;
+      figure.hidden = !show;
+      toggle.setAttribute("aria-pressed", String(show));
+      toggle.textContent = show ? "Hide 3D view" : "Show 3D view";
+      if (show) start3d();
+    });
+  }
+
+  // 3D scenes (07-design.md §11): the stage loads only once a scene comes into view and 3D
+  // views are on. Until then, and whenever 3D can't run, each scene shows its 2D fallback.
+  let stageLoaded = false;
+  function start3d() {
+    if (stageLoaded || document.documentElement.dataset.views3d !== "on" || !("IntersectionObserver" in window)) return;
+    const figures = [...document.querySelectorAll("figure[data-scene]")];
+    if (!figures.length) return;
+    const first = new IntersectionObserver((entries) => {
+      if (stageLoaded || !entries.some((e) => e.isIntersecting)) return;
+      stageLoaded = true;
+      first.disconnect();
+      import("/static/js/stage3d.js").then((stage) => stage.start()).catch(() => {});
+    });
+    figures.forEach((f) => first.observe(f));
+  }
+  start3d();
 
   // Session idle warning, 2 minutes before the server ends an idle session.
   const idle = Number(document.body.dataset.idleSeconds || 0);

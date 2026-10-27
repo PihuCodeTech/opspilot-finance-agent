@@ -1,0 +1,14 @@
+{# Pipeline track, flat: stations spaced as in 3D; quota waits hatched; AI calls as ticks. #}
+{% set g = s.svg %}
+<svg viewBox="0 0 {{ g.w }} {{ g.h }}" class="sv" role="group" aria-label="{{ s.label }}">
+  <defs><pattern id="{{ s.id }}-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line class="sv-hatch" x1="0" y1="0" x2="0" y2="6"/></pattern></defs>
+  <line class="sv-track" x1="{{ g.x0 }}" y1="56" x2="{{ g.x1 }}" y2="56"/>
+  {% for w in g.waits %}<rect class="sv-wait" x="{{ w.x }}" y="48" width="{{ w.width }}" height="16" fill="url(#{{ s.id }}-hatch)"><title>Waiting for AI quota{% if w.seconds %}: {{ w.seconds }} s{% endif %}</title></rect>{% endfor %}
+  {% for m in g.markers %}<line class="sv-marker" x1="{{ m.x }}" y1="42" x2="{{ m.x }}" y2="50"><title>{{ m.label }}</title></line>{% endfor %}
+  {% for st in g.stations %}
+  {% if st.target %}<a href="#{{ st.target }}" aria-label="{{ st.label }}{% if st.at is not none %}, recorded at +{{ st.at }} s{% else %}, untimed{% endif %}">{% endif %}
+    <circle class="sv-station{{ ' done' if st.done }}{{ ' current' if st.current }}" cx="{{ st.x }}" cy="56" r="5"/>
+    <text class="sv-small{{ ' current' if st.current }}" x="{{ st.x }}" y="{{ 36 if st.above else 84 }}" text-anchor="middle">{{ st.label }}</text>
+  {% if st.target %}</a>{% endif %}
+  {% endfor %}
+</svg>

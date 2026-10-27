@@ -37,8 +37,25 @@ from opspilot.web.db import transaction
 from opspilot.web.errors import wants_html
 from opspilot.web.present import ERROR_WORDS
 from opspilot.web.ratelimit import LOGIN_PER_IP, LOGIN_PER_USER_AND_IP, RateLimiter
+from opspilot.web.scenes import (
+    audit_chain,
+    desk_approvals,
+    desk_queue,
+    document_fan,
+    hero,
+    match_stack,
+    pipeline_live,
+    pipeline_track,
+    resolution_chain,
+)
 from opspilot.web.schemas import Body, body
-from opspilot.web.theme import THEME_COOKIE, VIEWS_3D_COOKIE, explicit_theme, views_3d_enabled
+from opspilot.web.theme import (
+    THEME_COOKIE,
+    VIEWS_3D_COOKIE,
+    explicit_theme,
+    views_3d_enabled,
+    views_3d_explicit,
+)
 
 router = APIRouter()
 
@@ -69,6 +86,7 @@ def page(
             "csrf_token": user.csrf_token if user else None,
             "theme": explicit_theme(request),
             "views_3d": views_3d_enabled(request),
+            "views_3d_explicit": views_3d_explicit(request),
             **context,
         },
         status_code=status,
@@ -89,7 +107,7 @@ def _demo_users(request: Request) -> list[Any]:
 def login_page(request: Request, user: MaybeUser) -> Response:
     if user is not None:
         return RedirectResponse("/", status_code=303)
-    return page(request, "login.html", None, demo_users=_demo_users(request))
+    return page(request, "login.html", None, demo_users=_demo_users(request), hero=hero())
 
 
 @router.post("/auth/login")
@@ -120,6 +138,7 @@ async def login(request: Request, data: Annotated[Login, Depends(body(Login))]) 
                 401,
                 error="Wrong username or password.",
                 demo_users=_demo_users(request),
+                hero=hero(),
             )
         raise UnauthenticatedError("Wrong username or password.")
     response: Response = (
@@ -256,6 +275,7 @@ def queue_page(
         statuses=list(CaseStatus),
         finding_codes=list(FindingCode),
         first_page=cursor is None,
+        desk=desk_queue(counts, user.role, filters.get("status")),
     )
 
 
@@ -269,7 +289,9 @@ def approvals_page(
     held = status == CaseStatus.HELD_FOR_APPROVER.value
     with transaction(request) as conn:
         cases = queries.list_approvals(conn, user.actor, held=held, cursor=cursor)
-    return app_page(request, "approvals.html", user, cases=cases, held=held)
+        counts = queries.approval_counts(conn, user.actor)
+    desk = desk_approvals(counts, user.actor.approval_unlimited, held)
+    return app_page(request, "approvals.html", user, cases=cases, held=held, desk=desk)
 
 
 @router.get("/cases/{case_id}")
@@ -278,12 +300,37 @@ def case_page(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Respon
         case = queries.case_detail(conn, user.actor, case_id)
         run_id = (case["evidence_run"] or case["latest_run"] or {}).get("id")
         trace = queries.run_trace(conn, user.actor, case_id, run_id) if run_id else None
+        timeline = queries.run_timeline(conn, user.actor, case_id, run_id) if run_id else {}
         audit = queries.case_audit(conn, user.actor, case_id, limit=100)
         progress = (
             queries.progress(conn, user.actor, case_id)
             if case["status"] in {CaseStatus.NEW, CaseStatus.INVESTIGATING}
             else None
         )
+    params = request.query_params
+    page_no = int(params["page"]) if params.get("page", "").isdigit() else 1
+    run = case["evidence_run"]
+    # The table is the default and authoritative view; 3D is an optional view beside it.
+    show_3d = params.get("evidence") == "3d"
+    scenes = {
+        "match_stack": match_stack(
+            case["match_strip"], run["checks"] if run else [], case["findings"]
+        )
+        if case["match_strip"]
+        else None,
+        "resolution_chain": resolution_chain(case["findings"], case["supporting_documents"]),
+        "pipeline": pipeline_track(trace, timeline) if trace else None,
+        "pipeline_live": pipeline_live(progress) if progress else None,
+        "audit_chain": audit_chain(audit),
+        "document_fan": document_fan(
+            case["invoice"],
+            case["supporting_documents"],
+            page=page_no,
+            highlight=params.get("highlight"),
+            previews=bool(case["invoice"]["redaction_supported"] and run),
+        ),
+    }
+    toggle = "?" + urlencode({**params, "evidence": "table" if show_3d else "3d"}) + "#evidence"
     return app_page(
         request,
         "case.html",
@@ -293,6 +340,9 @@ def case_page(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Respon
         audit=audit,
         progress=progress,
         supporting_kinds=list(SupportingKind),
+        scenes=scenes,
+        show_3d=show_3d,
+        evidence_toggle=toggle,
     )
 
 
@@ -303,7 +353,15 @@ def case_progress(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Re
         progress = queries.progress(conn, user.actor, case_id)
     if progress["status"] not in {CaseStatus.NEW, CaseStatus.INVESTIGATING}:
         return Response(status_code=204, headers={"HX-Refresh": "true"})
-    return page(request, "_progress.html", user, case_id=case_id, progress=progress)
+    return page(
+        request,
+        "_progress.html",
+        user,
+        case_id=case_id,
+        progress=progress,
+        live=pipeline_live(progress),
+        oob=True,
+    )
 
 
 @router.get("/uploads/new")

@@ -1,0 +1,15 @@
+{# Match stack, drawn flat: PO, receipt and invoice as three sheets; each line threads through all three. #}
+{% set g = s.svg %}
+<svg viewBox="0 0 {{ g.w }} {{ g.h }}" class="sv"{% if s.decorative %} aria-hidden="true" focusable="false"{% else %} role="group" aria-label="{{ s.label }}"{% endif %}>
+  {% for p in g.planes %}<polygon class="sv-plane{{ ' front' if p.front }}" points="{{ p.points }}"/><text class="sv-label" x="{{ p.x }}" y="{{ p.y }}">{{ p.label }}</text>{% endfor %}
+  {% for t in g.threads %}
+  {% if not s.decorative %}<a href="{{ t.href }}" aria-label="{{ t.aria }}">{% endif %}
+    <polyline class="sv-thread" points="{{ t.path }}"/>
+    {% for b in t.breaks %}
+    {% if b.self %}<circle class="sv-break {{ b.status }}" cx="{{ b.x2 }}" cy="{{ b.y2 }}" r="5"/>{% else %}<line class="sv-break {{ b.status }}" x1="{{ b.x1 }}" y1="{{ b.y1 }}" x2="{{ b.x2 }}" y2="{{ b.y2 }}"/>{% endif %}
+    <text class="sv-break-text {{ b.status }}" x="{{ b.tx }}" y="{{ b.ty }}">{{ b.text }}</text>
+    {% endfor %}
+    <text class="sv-small" x="{{ t.x }}" y="{{ t.y }}" text-anchor="middle">{{ t.line }}</text>
+  {% if not s.decorative %}</a>{% endif %}
+  {% endfor %}
+</svg>

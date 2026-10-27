@@ -1,4 +1,6 @@
-{# Investigation progress: polled every 2 s; announced politely on step change only. #}
+{# Investigation progress: polled every 2 s; announced politely on step change only. When
+   polled, it also refreshes the live pipeline track's data and fallback out of band. #}
+{% if oob is defined and oob %}{% from "partials/scene.html" import scene_oob %}{{ scene_oob(live) }}{% endif %}
 <div hx-get="/cases/{{ case_id if case_id is defined else case.id }}/_progress" hx-trigger="every 2s" hx-swap="outerHTML" data-progress>
   {% if progress.quota_resumes_at %}
   <p class="notice" role="status">Waiting for AI quota · resumes after {{ progress.quota_resumes_at | iso }} (in {{ progress.quota_resumes_at | until }})</p>
