@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_ui.html" import pill, copyable, icon %}
+{% from "partials/scene.html" import scene %}
 {% set inv = case.invoice.extracted or {} %}
 {% set run = case.evidence_run %}
 {% set checks = run.checks if run else [] %}
@@ -67,6 +68,7 @@
       {% for f in case.findings if f.exception_type == "FORENSICS_SIGNAL" %}
       <div class="review-row"><p>{{ FINDING[f.exception_type] }}: {{ f.explanation }} (information only)</p></div>
       {% endfor %}
+      {% if scenes.resolution_chain.payload["items"] %}{{ scene(scenes.resolution_chain) }}{% endif %}
       {% set to_accept = needing | selectattr("resolution") | list %}
       {% if not to_accept %}<p class="subline">No findings: every check passed, so there is nothing to accept.</p>{% endif %}
       <div class="form-actions">
@@ -83,6 +85,7 @@
     <p class="figure">{{ inv.total | money }}</p>
     {% if case.status in ("new", "investigating") %}
       <p class="sentence">Investigating…</p>
+      {% if scenes.pipeline_live %}{{ scene(scenes.pipeline_live) }}{% endif %}
     {% elif case.status == "investigation_failed" and not run %}
       <p class="sentence">The investigation failed: {{ case.latest_run.failure_reason if case.latest_run else "no reason recorded" }}.</p>
     {% elif not run %}
@@ -274,15 +277,20 @@
 
   {# ------------------------------------------------ evidence: the match strip #}
   <section class="card" id="evidence" aria-labelledby="evidence-title">
-    <div class="card-head"><h2 id="evidence-title">Evidence: line matching</h2><span class="meta">PO · Received · Invoice</span></div>
+    <div class="card-head"><h2 id="evidence-title">Evidence: line matching</h2>
+      {% if scenes.match_stack %}<div class="segmented" role="group" aria-label="Evidence view" data-evidence-view>
+        {% for view, label in [("table", "Table"), ("3d", "3D")] %}<a href="{{ evidence_views[view] }}" data-view="{{ view }}"{% if evidence_view == view %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>{% else %}<span class="meta">PO · Received · Invoice</span>{% endif %}
+    </div>
     {% if case.match_strip %}
-    <div class="table-scroll">
+    {# The table stays first in the DOM and readable by screen readers in either view. #}
+    <div class="table-scroll{{ ' visually-hidden' if evidence_view == '3d' }}" data-evidence-table>
     <table class="evidence strip">
       <caption class="visually-hidden">Each invoice line against its PO line and what was received</caption>
       <thead><tr><th scope="col">Line</th><th scope="col">Description</th><th scope="col" class="num">PO qty × price</th><th scope="col" class="num">Received</th><th scope="col" class="num">Invoice qty × price</th><th scope="col" class="num">Line total</th><th scope="col">Match</th></tr></thead>
       <tbody>
       {% for l in case.match_strip %}
-        <tr>
+        <tr id="strip-line-{{ l.line }}">
           <th scope="row">{{ l.line }}</th>
           <td>{{ l.description or "—" }}{% if l.po and l.method in ("description", "llm") %}<span class="sub">PO: {{ l.po.description }}</span>{% endif %}</td>
           <td class="num">{% if l.po %}{{ l.po.quantity | quantity }} × {{ l.po.unit_price | money }}{% else %}<span class="dash">—</span>{% endif %}</td>
@@ -295,6 +303,7 @@
       </tbody>
     </table>
     </div>
+    {{ scene(scenes.match_stack, hidden=evidence_view != "3d") }}
     {% else %}
     <p class="subline">{{ "Line matching appears when the investigation finishes." if case.status in ("new", "investigating") else "No lines were matched." }}</p>
     {% endif %}
@@ -304,9 +313,10 @@
   <section class="card" id="documents" aria-labelledby="documents-title">
     <div class="card-head"><h2 id="documents-title">Documents</h2><span class="meta">Every download is recorded in the audit trail</span></div>
     <ul class="doc-list" role="list">
-      <li><a class="button ghost" href="/api/v1/documents/{{ case.invoice.document_id }}">{{ icon("download") }}Invoice original</a></li>
-      {% for s in case.supporting_documents %}<li><a class="button ghost" href="/api/v1/documents/{{ s.document_id }}">{{ icon("download") }}{{ SUPPORTING_KIND[s.kind] }}{% if s.notice %} (scan, not redacted){% endif %}</a></li>{% endfor %}
+      <li id="doc-invoice"><a class="button ghost" href="/api/v1/documents/{{ case.invoice.document_id }}">{{ icon("download") }}Invoice original</a></li>
+      {% for s in case.supporting_documents %}<li id="doc-{{ s.id }}"><a class="button ghost" href="/api/v1/documents/{{ s.document_id }}">{{ icon("download") }}{{ SUPPORTING_KIND[s.kind] }}{% if s.notice %} (scan, not redacted){% endif %}</a></li>{% endfor %}
     </ul>
+    {{ scene(scenes.document_fan) }}
     {% if case.invoice.notice %}<p class="notice"><strong>Not redacted.</strong> {{ case.invoice.notice }}</p>
     {% elif run %}
       {% set page_no = request.query_params.get("page", "1") %}
@@ -335,7 +345,9 @@
       <summary><h2 id="trace-title">Run trace</h2></summary>
       <div class="body stack">
         <p class="subline">Run {{ trace.run.attempt }} ({{ trace.run.kind }}) · {{ trace.run.status }}{% if trace.run.model %} · {{ trace.run.model }}{% endif %}{% if trace.run.execution_ms is not none %} · {{ (trace.run.execution_ms / 1000) | round(1) }} s working{% endif %}{% if trace.run.quota_wait_ms %} · {{ (trace.run.quota_wait_ms / 1000) | round(1) }} s waiting for AI quota{% endif %}</p>
-        <ol class="progress">{% for s in trace.steps %}<li class="{{ 'done' if s.done }}">{{ s.step | replace("_", " ") | capitalize }}{% if s.counts %} ({% for k, v in s.counts.items() %}{{ v }} {{ k }}{{ ", " if not loop.last }}{% endfor %}){% endif %}</li>{% endfor %}</ol>
+        {{ scene(scenes.pipeline) }}
+        {% set check_counts = (trace.steps | selectattr("step", "equalto", "run_checks") | first).counts %}
+        <ol class="progress" aria-label="Steps, with when each wrote its record">{% for st in scenes.pipeline.payload.stations %}<li id="{{ st.target }}" class="{{ 'done' if st.done }}">{{ st.label }} · {% if st.at is not none %}{{ st.at }} s{% else %}<span class="subline">no record of its own</span>{% endif %}{% if st.key == "run_checks" and check_counts %} ({% for k, v in check_counts.items() %}{{ v }} {{ k }}{{ ", " if not loop.last }}{% endfor %}){% endif %}</li>{% endfor %}</ol>
         {% if trace.llm_calls %}
         <table class="evidence">
           <caption class="visually-hidden">AI calls in this run</caption>
@@ -368,10 +380,11 @@
         {% if v and v.overdue %}<p class="notice" role="status">The daily check is overdue: the last verification was {{ v.verified_at | ago }}.</p>{% endif %}
         {% if v and not v.covers_all_case_events %}<p class="notice">Events after the last verification are unchecked.</p>{% endif %}
         {% if v %}<p class="subline">{{ v.statement }}</p>{% endif %}
+        {% if scenes.audit_chain %}{{ scene(scenes.audit_chain) }}{% endif %}
         <table class="evidence">
           <caption class="visually-hidden">Audit events for this case</caption>
           <thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">By</th><th scope="col">Hash</th></tr></thead>
-          <tbody>{% for e in audit["items"] %}<tr><td><time datetime="{{ e.occurred_at.isoformat() }}">{{ e.occurred_at | iso }}</time></td><td>{{ e.event_type | replace(".", " ") | replace("_", " ") }}{% if e.payload.transition %} ({{ e.payload.transition }}){% endif %}{% if e.payload.reason %}: {{ e.payload.reason }}{% endif %}</td><td>{{ e.actor_name or "OpsPilot" }}</td><td class="mono">{{ e.hash[:10] }}</td></tr>{% endfor %}</tbody>
+          <tbody>{% for e in audit["items"] %}<tr id="audit-{{ e.seq }}"><td><time datetime="{{ e.occurred_at.isoformat() }}">{{ e.occurred_at | iso }}</time></td><td>{{ e.event_type | replace(".", " ") | replace("_", " ") }}{% if e.payload.transition %} ({{ e.payload.transition }}){% endif %}{% if e.payload.reason %}: {{ e.payload.reason }}{% endif %}</td><td>{{ e.actor_name or "OpsPilot" }}</td><td class="mono">{{ e.hash[:10] }}</td></tr>{% endfor %}</tbody>
         </table>
       </div>
     </details>
