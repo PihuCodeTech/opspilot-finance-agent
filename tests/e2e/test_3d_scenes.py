@@ -139,7 +139,7 @@ def test_every_scene_falls_back_to_the_same_data_in_2d(
     options = dict(FALLBACKS[why])
     browser: Browser = request.getfixturevalue(options.pop("browser"))
     page = open_page(browser, server, "priya.raman", **options)
-    for url in [server.url + "/", case_url(server, "price")]:
+    for url in [server.url + "/", case_url(server, "price") + "?evidence=3d"]:
         visit(page, url)
         page.wait_for_timeout(600)
         assert page.locator("figure.is-live, figure[data-scene] canvas").count() == 0, url
@@ -152,9 +152,8 @@ def test_every_scene_falls_back_to_the_same_data_in_2d(
     # The same figures, in words the fallback shows: the queue's piles and the price break.
     visit(page, server.url + "/")
     expect(page.locator("#desk .desk-bars")).to_contain_text("Needs review")
-    if why != "switched off":  # switched off, the evidence opens on the table
-        visit(page, case_url(server, "price"))
-        expect(page.locator("#match-stack .scene-fallback")).to_contain_text("Price +7.14%")
+    visit(page, case_url(server, "price") + "?evidence=3d")
+    expect(page.locator("#match-stack .scene-fallback")).to_contain_text("Price +7.14%")
     if why == "switched off":  # and no 3D code is even downloaded
         assert not [r.url for r in page.sent if "three" in r.url or "stage3d" in r.url]  # type: ignore[attr-defined]
     nothing_written(page)
@@ -166,7 +165,7 @@ def test_the_hero_stays_flat_under_reduced_motion_even_when_3d_is_turned_on(
 ) -> None:
     page = open_page(gl, server, "priya.raman", reduced=True, views3d="on")
     # 3D turned on explicitly allows static scenes (§11.5) ...
-    visit(page, case_url(server, "price"))
+    visit(page, case_url(server, "price") + "?evidence=3d")
     live(page, "match-stack")
     # ... but never the idle-rotating hero.
     context = gl.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
@@ -184,7 +183,7 @@ def test_the_hero_stays_flat_under_reduced_motion_even_when_3d_is_turned_on(
 
 def test_the_match_stack_selects_the_row_and_its_finding(gl: Browser, server: Server) -> None:
     page = open_page(gl, server, "priya.raman")
-    visit(page, case_url(server, "price"))
+    visit(page, case_url(server, "price") + "?evidence=3d")
     live(page, "match-stack")
     canvas = page.locator("#match-stack canvas")
     expect(canvas).to_have_attribute("role", "img")
@@ -205,22 +204,31 @@ def test_the_match_stack_selects_the_row_and_its_finding(gl: Browser, server: Se
     no_errors(page)
 
 
-def test_the_table_and_3d_switch_keeps_the_table_in_the_dom(gl: Browser, server: Server) -> None:
+def test_the_table_is_the_default_and_3d_only_adds_a_view_below_it(
+    gl: Browser, server: Server
+) -> None:
     page = open_page(gl, server, "priya.raman")
     visit(page, case_url(server, "price"))
-    table = page.locator("[data-evidence-table]")
-    expect(table).to_have_class(re.compile("visually-hidden"))  # 3D is the default when on
-    expect(page.get_by_role("table", name="Each invoice line against its PO line")).to_be_attached()
-    page.locator("[data-evidence-view] a[data-view=table]").click()
-    expect(table).not_to_have_class(re.compile("visually-hidden"))
+    table = page.get_by_role("table", name="Each invoice line against its PO line")
+    expect(table).to_be_visible()  # the default, authoritative view
     expect(page.locator("#match-stack")).to_be_hidden()
-    assert "evidence=table" in page.url
+    toggle = page.get_by_role("button", name="Show 3D view")
+    expect(toggle).to_have_attribute("aria-pressed", "false")
+    toggle.click()
+    live(page, "match-stack")
+    expect(table).to_be_visible()  # 3D never replaces the table
+    expect(page.get_by_role("button", name="Hide 3D view")).to_have_attribute(
+        "aria-pressed", "true"
+    )
+    page.get_by_role("button", name="Hide 3D view").click()
+    expect(page.locator("#match-stack")).to_be_hidden()
     nothing_written(page)
+    no_errors(page)
 
 
 def test_the_document_fan_opens_a_page_in_the_viewer(gl: Browser, server: Server) -> None:
     page = open_page(gl, server, "priya.raman")
-    visit(page, case_url(server, "price"))
+    visit(page, case_url(server, "price") + "?evidence=3d")
     live(page, "document-fan")
     tab_into(page, "document-fan")
     assert status(page, "document-fan").startswith("Invoice page 1")
@@ -232,7 +240,7 @@ def test_the_document_fan_opens_a_page_in_the_viewer(gl: Browser, server: Server
 
 def test_the_pipeline_track_opens_a_steps_trace_row(gl: Browser, server: Server) -> None:
     page = open_page(gl, server, "priya.raman")
-    visit(page, case_url(server, "price"))
+    visit(page, case_url(server, "price") + "?evidence=3d")
     live(page, "pipeline")
     tab_into(page, "pipeline", times=2)
     assert status(page, "pipeline").startswith("Extract")
@@ -298,13 +306,13 @@ def test_no_more_than_two_scenes_are_live_and_the_layout_does_not_move(
     gl: Browser, no_gl: Browser, server: Server
 ) -> None:
     flat = open_page(no_gl, server, "priya.raman", height=5000)
-    visit(flat, case_url(server, "price"))
+    visit(flat, case_url(server, "price") + "?evidence=3d")
     heights = flat.evaluate(
         "Object.fromEntries([...document.querySelectorAll('figure[data-scene]')]"
         ".map(f => [f.id, f.getBoundingClientRect().height]))"
     )
     page = open_page(gl, server, "priya.raman", height=5000)  # every scene in view at once
-    visit(page, case_url(server, "price"))
+    visit(page, case_url(server, "price") + "?evidence=3d")
     page.wait_for_timeout(1500)
     assert page.locator("figure.is-live").count() == 2
     assert page.locator("figure[data-scene]:visible").count() >= 3  # the rest stay flat
@@ -319,7 +327,7 @@ def test_no_more_than_two_scenes_are_live_and_the_layout_does_not_move(
 
 def test_a_lost_context_falls_back_to_2d(gl: Browser, server: Server) -> None:
     page = open_page(gl, server, "priya.raman")
-    visit(page, case_url(server, "price"))
+    visit(page, case_url(server, "price") + "?evidence=3d")
     live(page, "match-stack")
     page.evaluate(
         "document.querySelector('#match-stack canvas').getContext('webgl2')"
@@ -356,7 +364,12 @@ def test_every_scene_draws_in_both_themes(gl: Browser, server: Server, theme: st
     ]:
         page = open_page(gl, server, username)
         page.context.add_cookies([{"name": "theme", "value": theme, "url": server.url}])
-        visit(page, server.url + where if where.startswith("/") else case_url(server, where))
+        visit(
+            page,
+            server.url + where
+            if where.startswith("/")
+            else case_url(server, where) + "?evidence=3d",
+        )
         assert page.evaluate("document.documentElement.dataset.theme") == theme
         for scene_id in scenes:
             live(page, scene_id)
