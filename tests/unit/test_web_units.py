@@ -214,3 +214,23 @@ def test_bank_numbers_are_redacted_wherever_the_parse_saw_one() -> None:
         ]
     }
     assert [b.bbox for b in find_redactions(coordinates, 1)] == [(1, 2, 3, 4)]
+
+
+def test_a_repeated_structured_field_becomes_a_list() -> None:
+    data = RecordResolution.from_form(
+        FormData(
+            [
+                ("expected_version", "1"),
+                ("resolution_type", "not_duplicate"),
+                ("summary", "s"),
+                ("structured.both_invoice_numbers", "INV-1"),
+                ("structured.both_invoice_numbers", "INV-2"),
+                ("structured.distinguishing_fact", "different_goods"),
+            ]
+        )
+    )
+    model = RecordResolution.model_validate(data)
+    assert model.structured == {
+        "both_invoice_numbers": ["INV-1", "INV-2"],
+        "distinguishing_fact": "different_goods",
+    }

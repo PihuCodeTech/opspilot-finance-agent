@@ -7,6 +7,7 @@ P12; these templates are plain, accessible HTML.
 
 import uuid
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse, Response
@@ -17,8 +18,9 @@ from starlette.requests import Request
 
 from opspilot.cases import queries
 from opspilot.cases.errors import ForbiddenError
-from opspilot.config import Settings
-from opspilot.domain.enums import CaseStatus, SupportingKind, UserRole
+from opspilot.config import AppEnv, Settings
+from opspilot.db.seed import DEMO_USERS
+from opspilot.domain.enums import CaseStatus, FindingCode, SupportingKind, UserRole
 from opspilot.web.auth import (
     SESSION_COOKIE,
     CsrfUser,
@@ -33,9 +35,10 @@ from opspilot.web.auth import (
 )
 from opspilot.web.db import transaction
 from opspilot.web.errors import wants_html
+from opspilot.web.present import ERROR_WORDS
 from opspilot.web.ratelimit import LOGIN_PER_IP, LOGIN_PER_USER_AND_IP, RateLimiter
 from opspilot.web.schemas import Body, body
-from opspilot.web.theme import explicit_theme, views_3d_enabled
+from opspilot.web.theme import THEME_COOKIE, VIEWS_3D_COOKIE, explicit_theme, views_3d_enabled
 
 router = APIRouter()
 
@@ -75,11 +78,18 @@ def page(
 # ---------------------------------------------------------------- sign-in
 
 
+def _demo_users(request: Request) -> list[Any]:
+    """The seeded demo accounts (names and roles, never passwords), local and preview only."""
+    if _settings(request).app_env not in {AppEnv.LOCAL, AppEnv.PREVIEW}:
+        return []
+    return list(DEMO_USERS)
+
+
 @router.get("/login")
 def login_page(request: Request, user: MaybeUser) -> Response:
     if user is not None:
         return RedirectResponse("/", status_code=303)
-    return page(request, "login.html", None)
+    return page(request, "login.html", None, demo_users=_demo_users(request))
 
 
 @router.post("/auth/login")
@@ -103,7 +113,14 @@ async def login(request: Request, data: Annotated[Login, Depends(body(Login))]) 
     token = await run_in_threadpool(sign_in)
     if token is None:
         if wants_html(request):
-            return page(request, "login.html", None, 401, error="Wrong username or password.")
+            return page(
+                request,
+                "login.html",
+                None,
+                401,
+                error="Wrong username or password.",
+                demo_users=_demo_users(request),
+            )
         raise UnauthenticatedError("Wrong username or password.")
     response: Response = (
         RedirectResponse("/", status_code=303) if wants_html(request) else Response(status_code=204)
@@ -132,20 +149,113 @@ def logout(request: Request, user: CsrfUser) -> Response:
     return response
 
 
+# ---------------------------------------------------------------- preferences
+
+
+THEMES = {"light", "dark", "system"}
+YEAR = 60 * 60 * 24 * 365
+
+
+def _safe_next(target: str | None) -> str:
+    """Only a path on this site: never `//elsewhere` or a full URL."""
+    if not target or not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return "/"
+    return target
+
+
+@router.get("/preferences")
+def preferences(
+    theme: str | None = None,
+    views3d: str | None = None,
+    next: str | None = None,
+) -> Response:
+    """Display preferences only (theme, 3D views), in plain cookies (`07-design.md` §4.1, §11.6)."""
+    response = RedirectResponse(_safe_next(next), status_code=303)
+    if theme in THEMES:
+        if theme == "system":
+            response.delete_cookie(THEME_COOKIE, path="/")
+        else:
+            response.set_cookie(THEME_COOKIE, theme, max_age=YEAR, samesite="lax", path="/")
+    if views3d in {"on", "off"}:
+        response.set_cookie(VIEWS_3D_COOKIE, views3d, max_age=YEAR, samesite="lax", path="/")
+    return response
+
+
 # ---------------------------------------------------------------- pages
+
+
+def _shell(request: Request, user: SignedIn) -> dict[str, Any]:
+    """What the sidebar shows on every page: nav counts for approvers, where we are."""
+    with transaction(request) as conn:
+        counts = queries.approval_counts(conn, user.actor)
+    return {
+        "nav_counts": counts,
+        "path": request.url.path,
+        "idle_seconds": _settings(request).session_idle_hours * 3600,
+    }
+
+
+def app_page(
+    request: Request, name: str, user: SignedIn, status: int = 200, **context: Any
+) -> Response:
+    error = request.query_params.get("error")
+    return page(
+        request,
+        name,
+        user,
+        status,
+        **_shell(request, user),
+        error_code=error if error in ERROR_WORDS else ("unknown" if error else None),
+        **context,
+    )
 
 
 @router.get("/")
 def queue_page(
     request: Request,
     user: CurrentUser,
+    *,
     status: CaseStatus | None = None,
+    exception_type: FindingCode | None = None,
+    vendor_id: uuid.UUID | None = None,
+    q: str | None = None,
     cursor: str | None = None,
 ) -> Response:
     with transaction(request) as conn:
-        cases = queries.list_cases(conn, user.actor, status=status, cursor=cursor)
-    return page(
-        request, "queue.html", user, cases=cases, selected=status, statuses=list(CaseStatus)
+        cases = queries.list_cases(
+            conn,
+            user.actor,
+            status=status,
+            exception_type=exception_type,
+            vendor_id=vendor_id,
+            q=q,
+            oldest_first=True,
+            cursor=cursor,
+        )
+        counts = queries.queue_counts(conn, user.actor)
+        vendors = queries.queue_vendors(conn, user.actor)
+    filters = {
+        k: v
+        for k, v in {
+            "status": status.value if status else None,
+            "exception_type": exception_type.value if exception_type else None,
+            "vendor_id": str(vendor_id) if vendor_id else None,
+            "q": q.strip() if q and q.strip() else None,
+        }.items()
+        if v
+    }
+    return app_page(
+        request,
+        "queue.html",
+        user,
+        cases=cases,
+        counts=counts,
+        vendors=vendors,
+        filters=filters,
+        filter_query=urlencode(filters),
+        statuses=list(CaseStatus),
+        finding_codes=list(FindingCode),
+        first_page=cursor is None,
     )
 
 
@@ -153,31 +263,53 @@ def queue_page(
 def approvals_page(
     request: Request,
     user: CurrentUser,
-    held: bool = False,
+    status: str | None = None,
     cursor: str | None = None,
 ) -> Response:
+    held = status == CaseStatus.HELD_FOR_APPROVER.value
     with transaction(request) as conn:
         cases = queries.list_approvals(conn, user.actor, held=held, cursor=cursor)
-    return page(request, "approvals.html", user, cases=cases, held=held)
+    return app_page(request, "approvals.html", user, cases=cases, held=held)
 
 
 @router.get("/cases/{case_id}")
 def case_page(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Response:
     with transaction(request) as conn:
         case = queries.case_detail(conn, user.actor, case_id)
-    return page(
+        run_id = (case["evidence_run"] or case["latest_run"] or {}).get("id")
+        trace = queries.run_trace(conn, user.actor, case_id, run_id) if run_id else None
+        audit = queries.case_audit(conn, user.actor, case_id, limit=100)
+        progress = (
+            queries.progress(conn, user.actor, case_id)
+            if case["status"] in {CaseStatus.NEW, CaseStatus.INVESTIGATING}
+            else None
+        )
+    return app_page(
         request,
         "case.html",
         user,
         case=case,
+        trace=trace,
+        audit=audit,
+        progress=progress,
         supporting_kinds=list(SupportingKind),
     )
+
+
+@router.get("/cases/{case_id}/_progress")
+def case_progress(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Response:
+    """Polled every 2 s while investigating; once the run ends, the page reloads itself."""
+    with transaction(request) as conn:
+        progress = queries.progress(conn, user.actor, case_id)
+    if progress["status"] not in {CaseStatus.NEW, CaseStatus.INVESTIGATING}:
+        return Response(status_code=204, headers={"HX-Refresh": "true"})
+    return page(request, "_progress.html", user, case_id=case_id, progress=progress)
 
 
 @router.get("/uploads/new")
 def upload_page(request: Request, user: CurrentUser) -> Response:
     queries.require_role(user.actor, UserRole.ANALYST)
-    return page(
+    return app_page(
         request,
         "upload.html",
         user,

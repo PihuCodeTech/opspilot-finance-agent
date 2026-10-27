@@ -16,7 +16,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import Connection, insert, select
+from sqlalchemy import Connection, Engine, insert, select, text
 
 from opspilot.audit.chain import ZERO_HASH, event_content, event_hash
 from opspilot.audit.digests import (
@@ -270,3 +270,22 @@ def record(
         )
     )
     return verification_id
+
+
+def verify_and_record(read: Engine, write: Engine) -> VerifyReport:
+    """One verification: read everything as the read-only verifier role in one snapshot,
+    then store the result as the app role (insert only). Used by the CLI and the daily job."""
+    started = dt.datetime.now(dt.UTC)
+    with read.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
+        verified_as = str(conn.execute(text("SELECT current_user")).scalar_one())
+        report = verify(conn)
+        conn.rollback()
+    with write.begin() as conn:
+        record(
+            conn,
+            report,
+            started_at=started,
+            finished_at=dt.datetime.now(dt.UTC),
+            verified_as=verified_as,
+        )
+    return report

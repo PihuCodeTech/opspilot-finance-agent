@@ -19,7 +19,9 @@ from dataclasses import dataclass
 
 import structlog
 from sqlalchemy import Connection, Engine, select
+from sqlalchemy.exc import SQLAlchemyError
 
+from opspilot.audit.verify import VerifyReport
 from opspilot.cases.service import recheck_held_cases
 from opspilot.db.models import Case, EvalRun, InvestigationRun
 from opspilot.domain.enums import CaseStatus, EvalRunStatus, JobType
@@ -48,6 +50,7 @@ def no_checkpointer(_thread_id: str) -> None:
 class CleanupReport:
     released: int  # held cases moved to pending_approval (T11)
     threads_deleted: int
+    verified: bool | None = None  # the audit check: ok, failed, or None when it didn't run
 
 
 def threads_to_delete(conn: Connection, retention_days: int, now: dt.datetime) -> list[str]:
@@ -77,15 +80,30 @@ def cleanup(
     retention_days: int,
     delete_thread: ThreadDeleter = no_checkpointer,
     now: dt.datetime | None = None,
+    verify_audit: Callable[[], VerifyReport] | None = None,
 ) -> CleanupReport:
-    """Idempotent: re-running releases nothing new and deleting a missing thread is a no-op."""
+    """Idempotent: re-running releases nothing new and deleting a missing thread is a no-op.
+
+    Then the daily audit verification (owner follow-up, 2026-10-26). A failed check is
+    logged as an error and recorded, never hidden; if the check can't run at all, case
+    pages show the last result as overdue rather than as current.
+    """
     with engine.begin() as conn:
         released = recheck_held_cases(conn)
         threads = threads_to_delete(conn, retention_days, now or dt.datetime.now(dt.UTC))
     for thread_id in threads:
         delete_thread(thread_id)
-    log.info("cleanup.done", released=len(released), threads=len(threads))
-    return CleanupReport(len(released), len(threads))
+    verified: bool | None = None
+    if verify_audit is not None:
+        try:
+            verified = verify_audit().ok
+        except (RuntimeError, SQLAlchemyError) as exc:
+            log.error("audit.verify_not_run", error=type(exc).__name__, reason=str(exc)[:200])
+        else:
+            if not verified:
+                log.error("audit.verify_failed")
+    log.info("cleanup.done", released=len(released), threads=len(threads), verified=verified)
+    return CleanupReport(len(released), len(threads), verified)
 
 
 def schedule_cleanup(engine: Engine, today: dt.date) -> None:

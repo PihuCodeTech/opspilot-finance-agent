@@ -1,16 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Cases · OpsPilot{% endblock %}
 {% block main %}
-  <h1>Cases</h1>
-  <form method="get" action="/">
-    <label for="status">Status</label>
-    <select id="status" name="status">
-      <option value="">All</option>
-      {% for s in statuses %}<option value="{{ s.value }}"{% if selected == s %} selected{% endif %}>{{ s.value }}</option>{% endfor %}
+{% set parts = [] %}
+{% if counts.get("needs_review") %}{% set _ = parts.append(counts["needs_review"] ~ " need review") %}{% endif %}
+{% if counts.get("pending_approval") %}{% set _ = parts.append(counts["pending_approval"] ~ " waiting for approval") %}{% endif %}
+{% if counts.get("investigating", 0) + counts.get("new", 0) %}{% set _ = parts.append((counts.get("investigating", 0) + counts.get("new", 0)) ~ " investigating") %}{% endif %}
+{% if counts.get("investigation_failed") %}{% set _ = parts.append(counts["investigation_failed"] ~ " failed") %}{% endif %}
+{% if counts.get("held_for_approver") %}{% set _ = parts.append(counts["held_for_approver"] ~ " held") %}{% endif %}
+<div class="title-row">
+  <div>
+    <h1>Cases</h1>
+    <p class="subline">{{ parts | join(" · ") if parts else "No open cases." }}</p>
+  </div>
+  {% if user.role == "analyst" %}<a class="button primary" href="/uploads/new">Upload invoice</a>{% endif %}
+</div>
+<form class="filters" method="get" action="/" role="search" aria-label="Filter cases">
+  <div class="field">
+    <label for="f-status">Status</label>
+    <select id="f-status" name="status">
+      <option value="">All statuses</option>
+      {% for s in statuses %}<option value="{{ s.value }}"{% if filters.get("status") == s.value %} selected{% endif %}>{{ STATUS[s.value][2] }}{% if counts.get(s.value) %} ({{ counts[s.value] }}){% endif %}</option>{% endfor %}
     </select>
-    <button type="submit">Filter</button>
-  </form>
-  {% set empty = "No cases match." %}
-  {% set extra_query = "&status=" ~ selected.value if selected else "" %}
-  {% include "_case_rows.html" %}
+  </div>
+  <div class="field">
+    <label for="f-type">Exception type</label>
+    <select id="f-type" name="exception_type">
+      <option value="">All types</option>
+      {% for f in finding_codes %}<option value="{{ f.value }}"{% if filters.get("exception_type") == f.value %} selected{% endif %}>{{ FINDING[f.value] }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="f-vendor">Vendor</label>
+    <select id="f-vendor" name="vendor_id">
+      <option value="">All vendors</option>
+      {% for v in vendors %}<option value="{{ v.id }}"{% if filters.get("vendor_id") == v.id | string %} selected{% endif %}>{{ v.name }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="f-q">Invoice or PO number</label>
+    <input id="f-q" type="search" name="q" value="{{ filters.get('q', '') }}" maxlength="64" autocomplete="off">
+  </div>
+  <button class="button secondary" type="submit">Filter</button>
+  {% if filters %}<a class="text-button" href="/">Clear filters</a>{% endif %}
+  <span class="result-count">{{ cases.total }} {{ "case" if cases.total == 1 else "cases" }} · oldest first</span>
+</form>
+{% set mode = "cases" %}{% set held = False %}
+{% set caption = "Cases, oldest first" %}
+{% set empty = ("No cases match these filters." if filters else "No cases yet. New uploads appear here.") %}
+{% include "_case_rows.html" %}
 {% endblock %}

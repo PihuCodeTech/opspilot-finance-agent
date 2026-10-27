@@ -732,12 +732,18 @@ def test_html_forms_use_the_same_rules(web: Web) -> None:
     no_token = browser.post(
         f"/cases/{case_id}/dismiss", data={"reason": "dup", "expected_version": str(version)}
     )
-    assert no_token.status_code == 403 and "<html" in no_token.text
+    # A failed form goes back to its page with the code; the page words it inline.
+    assert no_token.status_code == 303
+    assert no_token.headers["location"] == f"/cases/{case_id}?error=csrf_failed"
+    shown = browser.get(no_token.headers["location"])
+    assert shown.status_code == 200 and "The form expired. Try again." in shown.text
     stale = browser.post(
         f"/cases/{case_id}/dismiss",
         data={"reason": "dup", "expected_version": "99", "csrf_token": token},
     )
-    assert stale.status_code == 409 and "<html" in stale.text
+    assert stale.headers["location"] == f"/cases/{case_id}?error=stale_version"
+    spoofed = browser.get(f"/cases/{case_id}?error=<script>alert(1)</script>")
+    assert "<script>alert(1)" not in spoofed.text and "That couldn&#39;t be done." in spoofed.text
     done = browser.post(
         f"/cases/{case_id}/proposal",
         data={
@@ -758,5 +764,49 @@ def test_html_forms_use_the_same_rules(web: Web) -> None:
     )
     assert auditor.get("/uploads/new").status_code == 403
     assert auditor.get("/approvals").status_code == 403
+    approver = web.client()
+    approver.post(
+        "/auth/login",
+        data={"username": web.username(web.world.approver), "password": PASSWORD},
+        headers={"Accept": "text/html"},
+    )
+    for path in ("/approvals", "/approvals?status=held_for_approver", "/", f"/cases/{case_id}"):
+        assert approver.get(path).status_code == 200, path  # the approver's nav renders
     out = browser.post("/auth/logout", data={"csrf_token": token}, headers={"Accept": "text/html"})
     assert out.status_code == 303 and out.headers["location"] == "/login"
+
+
+def test_a_duplicate_can_be_resolved_over_http_with_both_numbers(web: Web) -> None:
+    w = web.world
+    ledger = w.ledger()
+    case_id = w.case([cs.approval(), cs.duplicate(ledger)])
+    finding = w.finding(case_id, FindingCode.DUPLICATE_INVOICE)
+    client = web.client(w.analyst)
+    confirmation = client.mutate(
+        "POST",
+        f"/api/v1/cases/{case_id}/supporting-documents",
+        files={"file": ("confirmation.pdf", pdf_bytes(), "application/pdf")},
+        data={"kind": "vendor_confirmation", "description": "vendor confirms both invoices"},
+    ).json()["supporting_document_id"]
+    resolved = client.mutate(
+        "POST",
+        f"/api/v1/cases/{case_id}/findings/{finding}/resolutions",
+        json={
+            "resolution_type": "not_duplicate",
+            "summary": "different shipment",
+            "evidence": [
+                {"supporting_document_id": confirmation},
+                {"erp_entity": "ledger_invoices", "erp_id": str(ledger)},
+            ],
+            "structured": {
+                "both_invoice_numbers": [cs.INVOICE_NUMBER, cs.LEDGER_NUMBER],
+                "distinguishing_fact": "different_goods",
+            },
+            "expected_version": client.version(case_id),
+        },
+    )
+    assert resolved.status_code == 201, resolved.text
+    detail = client.get(f"/api/v1/cases/{case_id}").json()
+    duplicate = next(f for f in detail["findings"] if f["exception_type"] == "DUPLICATE_INVOICE")
+    assert duplicate["resolved"] is True
+    assert duplicate["resolution"]["digest"] == resolved.json()["digest"]

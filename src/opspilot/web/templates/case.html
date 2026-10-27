@@ -1,152 +1,470 @@
 {% extends "base.html" %}
-{% block title %}Case · OpsPilot{% endblock %}
-{% macro hidden() %}
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <input type="hidden" name="expected_version" value="{{ case.version }}">
+{% from "_ui.html" import pill, copyable, icon %}
+{% set inv = case.invoice.extracted or {} %}
+{% set run = case.evidence_run %}
+{% set checks = run.checks if run else [] %}
+{% set vendor_name = case.vendor.name if case.vendor else (inv.vendor_name or "Vendor not identified") %}
+{% block title %}{{ inv.invoice_number or "Case" }} · OpsPilot{% endblock %}
+{% macro hidden() %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="expected_version" value="{{ case.version }}">{% endmacro %}
+{% macro reason_field(id, label) %}
+<div class="form-field">
+  <label for="{{ id }}">{{ label }}</label>
+  <textarea id="{{ id }}" name="reason" required maxlength="1000" data-count aria-describedby="{{ id }}-count"></textarea>
+  <span class="counter" id="{{ id }}-count">0 of 1000</span>
+</div>
 {% endmacro %}
 {% block main %}
-  {% set inv = case.invoice.extracted or {} %}
-  <h1>Invoice {{ inv.invoice_number or "not read yet" }}</h1>
-  <dl>
-    <dt>Status</dt><dd>{{ case.status }}</dd>
-    <dt>Vendor</dt><dd>{{ case.vendor.name if case.vendor else (inv.vendor_name or "Not identified") }}</dd>
-    <dt>Total</dt><dd class="num">{{ inv.total or "—" }}</dd>
-    <dt>Bank account</dt><dd>{{ case.invoice.bank_account or "—" }}</dd>
-    {% if case.required_approval_amount is not none %}
-    <dt>Approval needed for</dt><dd class="num">{{ case.required_approval_amount }} ({{ case.required_approver_tier }})</dd>
-    {% endif %}
-    {% if case.latest_run and case.latest_run.failure_reason %}
-    <dt>Last run failed</dt><dd>{{ case.latest_run.failure_reason }}</dd>
-    {% endif %}
-  </dl>
-  <p><a href="/api/v1/documents/{{ case.invoice.document_id }}">Download the original invoice</a> (every download is recorded in the audit trail)</p>
-  {% if case.invoice.notice %}<p role="note"><strong>Not redacted.</strong> {{ case.invoice.notice }}</p>{% endif %}
+{% set is_analyst = user.role == "analyst" %}
+{% set is_approver = user.role == "approver" %}
+{% set needing = case.findings | selectattr("needs_resolution") | list %}
+{% set unresolved = needing | rejectattr("resolved") | list %}
+{% set inconclusive = checks | selectattr("status", "equalto", "inconclusive") | list %}
+{% set failed_checks = checks | selectattr("status", "equalto", "fail") | list %}
+{% set proposal = case.proposal %}
+{% set paying = proposal and proposal.action == "approve_for_payment" %}
+{% set check_by_id = {} %}{% for c in checks %}{% set _ = check_by_id.update({c.id | string: c}) %}{% endfor %}
+{% set supporting_by_kind = {} %}{% for s in case.supporting_documents %}{% set _ = supporting_by_kind.setdefault(s.kind, []).append(s) %}{% endfor %}
 
-  <h2>Findings</h2>
-  {% for f in case.findings %}
-    <section aria-labelledby="finding-{{ f.id }}">
-      <h3 id="finding-{{ f.id }}">{{ f.exception_type }} · {{ f.subject_key }}</h3>
-      <p>{{ f.explanation }}</p>
-      {% for c in f.citations %}<blockquote><p>{{ c.quoted_text }}</p><footer>Policy {{ c.section_id }}, {{ c.title }}</footer></blockquote>{% endfor %}
-      {% if f.resolution %}
-        <p>Resolution: {{ f.resolution.resolution_type }}, {{ "valid" if f.resolution.valid else "no longer valid" }}. {{ f.resolution.summary }}</p>
-      {% elif f.needs_resolution and not f.resolvable_by_record %}
-        <p>Only a recheck can clear this finding.</p>
-      {% elif f.needs_resolution %}
-        <p>Unresolved.</p>
-      {% endif %}
-      {% if case.invoice.page_count and case.invoice.redaction_supported %}<p><a href="/api/v1/documents/{{ case.invoice.document_id }}/pages/1.png?highlight=finding:{{ f.id }}">Show on the invoice</a></p>{% endif %}
-    </section>
-  {% else %}
-    <p>{{ "No findings: every check passed." if case.evidence_run else "The investigation hasn't finished yet." }}</p>
-  {% endfor %}
+<div class="title-row">
+  <div>
+    <h1><span class="id">{{ inv.invoice_number or "Invoice not read yet" }}</span> · {{ vendor_name }}</h1>
+    <p class="subline">
+      Received {{ case.invoice.received_at.date().isoformat() }}
+      {% if inv.po_number %}<span class="sep">·</span>PO <span class="mono">{{ inv.po_number }}</span>{% endif %}
+      {% if run and run.finished_at %}<span class="sep">·</span>Investigated <time datetime="{{ run.finished_at.isoformat() }}" title="{{ run.finished_at | iso }}">{{ run.finished_at | ago }}</time> by OpsPilot (run {{ run.attempt }})
+      {% elif case.latest_run %}<span class="sep">·</span>Run {{ case.latest_run.attempt }} {{ case.latest_run.status }}{% endif %}
+    </p>
+  </div>
+  {{ pill(case.status, case.outcome.action if case.outcome else None) }}
+</div>
 
-  {% if case.evidence_run %}
-  <h2>Checks</h2>
-  <table>
-    <thead><tr><th scope="col">Check</th><th scope="col">Subject</th><th scope="col">Result</th><th scope="col">Why inconclusive</th></tr></thead>
-    <tbody>
-    {% for c in case.evidence_run.checks %}
-      <tr><td>{{ c.check_code }}</td><td>{{ c.subject_key }}</td><td>{{ c.status }}</td><td>{{ c.inconclusive_reason or "" }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
+{% if error_code %}<p class="notice error" role="alert">{{ ERROR_WORDS[error_code] }}</p>{% endif %}
+<nav class="skip-links" aria-label="On this page"><a href="#findings">Findings</a><a href="#evidence">Evidence</a><a href="#decision">Decision</a></nav>
 
-  <h2>Proposal</h2>
-  <p>{% if case.proposal %}{{ case.proposal.action }} (by {{ "the agent" if case.proposal.source == "agent" else case.proposal.changed_by.display_name }}){% else %}None yet.{% endif %}</p>
+<div class="case-grid">
+<div class="case-main">
 
-  {% if case.supporting_documents %}
-  <h2>Supporting documents</h2>
-  <ul>{% for s in case.supporting_documents %}<li><a href="/api/v1/documents/{{ s.document_id }}">{{ s.kind }}</a>: {{ s.description }}{% if s.notice %} (scanned image, not redacted){% endif %}</li>{% endfor %}</ul>
-  {% endif %}
-
-  {% if case.operations %}
-  <h2>What you can do</h2>
-  {% endif %}
-  {% if "investigate" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/investigate">{{ hidden() }}<button type="submit">Retry the investigation</button></form>
-  {% endif %}
-  {% if "change_proposal" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/proposal">
-    {{ hidden() }}
-    <fieldset><legend>Change the proposal</legend>
-      <label for="action">Action</label>
-      <select id="action" name="action">{% for a in case.allowed_actions %}<option value="{{ a.value }}">{{ a.value }}</option>{% endfor %}</select>
-      <label for="proposal-reason">Reason</label>
-      <input id="proposal-reason" name="reason" required maxlength="1000">
-      <button type="submit">Save the proposal</button>
-    </fieldset>
-  </form>
-  {% endif %}
-  {% if "submit" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/submit">{{ hidden() }}<button type="submit">Submit for approval</button></form>
-  {% endif %}
-  {% if "add_supporting_document" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/supporting-documents" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <fieldset><legend>Add a supporting document</legend>
-      <label for="kind">Kind</label>
-      <select id="kind" name="kind">{% for k in supporting_kinds %}<option value="{{ k.value }}">{{ k.value }}</option>{% endfor %}</select>
-      <label for="description">Description</label>
-      <input id="description" name="description" required maxlength="1000">
-      <label for="supporting-file">File</label>
-      <input id="supporting-file" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required>
-      <button type="submit">Attach the document</button>
-    </fieldset>
-  </form>
-  {% endif %}
-  {% if "recheck" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/recheck">
-    {{ hidden() }}
-    <fieldset><legend>Request a recheck</legend>
-      <label for="recheck-reason">Reason</label>
-      <input id="recheck-reason" name="reason" required maxlength="1000">
-      <label for="po-number">Corrected PO number (optional)</label>
-      <input id="po-number" name="po_number" maxlength="64">
-      <button type="submit">Recheck the invoice</button>
-    </fieldset>
-  </form>
-  {% endif %}
-  {% if "dismiss" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/dismiss">
-    {{ hidden() }}
-    <label for="dismiss-reason">Reason for closing without action</label>
-    <input id="dismiss-reason" name="reason" required maxlength="1000">
-    <button type="submit">Close the case</button>
-  </form>
-  {% endif %}
-  {% if "approve" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/approve">
-    {{ hidden() }}
-    <fieldset><legend>Approve {{ case.proposal.action if case.proposal else "" }}</legend>
-      {% for f in case.findings if f.resolution and f.needs_resolution %}
-        <p><input type="checkbox" id="accept-{{ f.resolution.id }}" name="accepted_resolution" value="{{ f.resolution.id }}:{{ f.resolution.digest }}" required>
-        <label for="accept-{{ f.resolution.id }}">I accept the {{ f.resolution.resolution_type }} resolution of {{ f.exception_type }}</label></p>
+  {# ------------------------------------------------ approval review (approver, payment) #}
+  {% if is_approver and case.status == "pending_approval" and paying and "approve" in case.operations %}
+  <section class="card" id="review" aria-labelledby="review-title">
+    <h2 id="review-title">Approve payment of {{ case.required_approval_amount | money }} to {{ vendor_name }}</h2>
+    <p class="subline">{{ (case.required_approver_tier or "standard") | capitalize }} tier · your {{ "authority: controller, no limit" if user.actor.approval_unlimited else "limit " ~ (user.actor.approval_limit | money) }}</p>
+    <form method="post" action="/cases/{{ case.id }}/approve" data-review>
+      {{ hidden() }}
+      {% for f in needing if f.resolution %}
+      <div class="review-row">
+        <p><strong>{{ FINDING[f.exception_type] }}</strong>{% for cid in f.check_result_ids %}{% set c = check_by_id.get(cid | string) %}{% if c %}{% for r in evidence_rows(c)[:1] %} · {{ r.field }}: {{ r.invoice }} vs {{ r.compared_label }} {{ r.compared }} ({{ r.difference }}){% endfor %}{% endif %}{% endfor %}</p>
+        <p>{{ RESOLUTION[f.resolution.resolution_type] }}: {{ f.resolution.summary }}</p>
+        <p class="subline">Evidence:
+          {% for e in f.resolution.evidence %}{% if e.supporting_document_id %}{% for s in case.supporting_documents if s.id == e.supporting_document_id %}<a href="/api/v1/documents/{{ s.document_id }}">{{ SUPPORTING_KIND[s.kind] }}</a>{% endfor %}{% elif e.bank_verification_id %}bank verification record{% else %}ERP {{ e.erp_entity }}{% endif %}{{ "; " if not loop.last }}{% endfor %}
+          <span class="sep">·</span>digest <span class="mono">{{ f.resolution.digest[:12] }}…</span></p>
+        <p class="accept">
+          <input type="checkbox" id="accept-{{ f.resolution.id }}" name="accepted_resolution" value="{{ f.resolution.id }}:{{ f.resolution.digest }}" required data-accept>
+          <label for="accept-{{ f.resolution.id }}">Accept resolution: {{ RESOLUTION[f.resolution.resolution_type] }} for “{{ FINDING[f.exception_type] }}”</label>
+        </p>
+      </div>
       {% endfor %}
-      <button type="submit">Approve</button>
-    </fieldset>
-  </form>
-  {% elif case.blocked.approve %}
-  <p>You can't approve this case ({{ case.blocked.approve }}).</p>
-  {% endif %}
-  {% if "decline" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/decline">
-    {{ hidden() }}
-    <label for="decline-reason">Reason for declining</label>
-    <input id="decline-reason" name="reason" required maxlength="1000">
-    <button type="submit">Decline and return to the analyst</button>
-  </form>
-  {% endif %}
-  {% if "reopen" in case.operations %}
-  <form method="post" action="/cases/{{ case.id }}/reopen">
-    {{ hidden() }}
-    <label for="reopen-reason">Reason for reopening</label>
-    <input id="reopen-reason" name="reason" required maxlength="1000">
-    <button type="submit">Reverse the action and reopen</button>
-  </form>
+      {% for f in case.findings if f.exception_type == "FORENSICS_SIGNAL" %}
+      <div class="review-row"><p>{{ FINDING[f.exception_type] }}: {{ f.explanation }} (information only)</p></div>
+      {% endfor %}
+      {% set to_accept = needing | selectattr("resolution") | list %}
+      {% if not to_accept %}<p class="subline">No findings: every check passed, so there is nothing to accept.</p>{% endif %}
+      <div class="form-actions">
+        <button type="submit" class="button primary" data-approve>Approve payment of {{ case.required_approval_amount | money }}</button>
+      </div>
+      {% if to_accept %}<p class="review-progress" aria-live="polite" data-review-progress data-total="{{ to_accept | length }}">Accept all {{ to_accept | length }} {{ "resolution" if to_accept | length == 1 else "resolutions" }} to approve.</p>{% endif %}
+    </form>
+  </section>
   {% endif %}
 
-  <h2>Decisions</h2>
-  <ol>{% for d in case.decisions %}<li>{{ d.kind }}{% if d.actor %} by {{ d.actor.display_name }}{% endif %}{% if d.reason %}: {{ d.reason }}{% endif %}</li>{% else %}<li>None yet.</li>{% endfor %}</ol>
+  {# ------------------------------------------------ verdict #}
+  <section class="card verdict" aria-labelledby="verdict-title">
+    <h2 id="verdict-title" class="visually-hidden">Verdict</h2>
+    <p class="figure">{{ inv.total | money }}</p>
+    {% if case.status in ("new", "investigating") %}
+      <p class="sentence">Investigating…</p>
+    {% elif case.status == "investigation_failed" and not run %}
+      <p class="sentence">The investigation failed: {{ case.latest_run.failure_reason if case.latest_run else "no reason recorded" }}.</p>
+    {% elif not run %}
+      <p class="sentence">Not investigated yet.</p>
+    {% elif inconclusive %}
+      <p class="sentence">{{ inconclusive | length }} {{ "check" if inconclusive | length == 1 else "checks" }} inconclusive · recheck needed</p>
+    {% elif not needing %}
+      <p class="sentence">All {{ checks | length }} checks passed</p>
+    {% else %}
+      <p class="sentence">{{ needing | length }} {{ "exception" if needing | length == 1 else "exceptions" }} found · {% if unresolved %}{{ (needing | length) - (unresolved | length) }} resolved · payment blocked{% else %}all resolved{% endif %}</p>
+    {% endif %}
+    {% if checks %}
+    <p class="checks-line" aria-label="Check results">
+      {% set seen = [] %}
+      {% for c in checks if c.check_code not in seen %}{% set _ = seen.append(c.check_code) %}
+        {% set group = checks | selectattr("check_code", "equalto", c.check_code) | list %}
+        {% set worst = "fail" if group | selectattr("status", "equalto", "fail") | list else ("inconclusive" if group | selectattr("status", "equalto", "inconclusive") | list else "pass") %}
+        <a href="#check-{{ c.check_code }}" class="{{ 'bad' if worst == 'fail' else 'warn' if worst == 'inconclusive' else '' }}">{{ CHECK[c.check_code] }} {% if worst == "fail" %}× failed{% elif worst == "inconclusive" %}? inconclusive{% else %}{{ icon("check", 12) }}<span class="visually-hidden">passed</span>{% endif %}</a>
+      {% endfor %}
+    </p>
+    {% endif %}
+  </section>
+
+  {# ------------------------------------------------ findings #}
+  <section class="card" id="findings" aria-labelledby="findings-title">
+    <div class="card-head"><h2 id="findings-title">Findings</h2>{% if needing %}<span class="meta">{{ unresolved | length }} unresolved</span>{% endif %}</div>
+    {% for f in by_severity(case.findings) %}
+    <article class="finding" id="finding-{{ f.id }}" aria-labelledby="fh-{{ f.id }}">
+      <div class="finding-head">
+        <h3 id="fh-{{ f.id }}">{{ FINDING[f.exception_type] }}{% if f.subject_key.startswith("line:") %} · line {{ f.subject_key[5:] }}{% endif %}</h3>
+        <span class="pill neutral">{{ f.severity | capitalize }} severity</span>
+        {% if f.exception_type == "FORENSICS_SIGNAL" %}<span class="pill neutral">Signal</span>
+        {% elif f.exception_type == "EXTRACTION_UNCERTAIN" %}<span class="pill warning"><span aria-hidden="true">?</span>Inconclusive</span>
+        {% elif f.resolved %}<span class="pill positive">{{ icon("check", 12) }}Resolved</span>
+        {% else %}<span class="pill negative"><span aria-hidden="true">×</span>Unresolved</span>{% endif %}
+      </div>
+      <p class="explanation">{{ f.explanation }}{% if f.grounding_status == "fallback" %} <span class="fallback-label">Standard explanation</span>{% endif %}</p>
+      {% for cid in f.check_result_ids %}{% set c = check_by_id.get(cid | string) %}{% if c %}
+      <table class="evidence" id="check-{{ c.check_code }}">
+        <caption class="visually-hidden">{{ CHECK[c.check_code] }} check evidence</caption>
+        <thead><tr><th scope="col">Field</th><th scope="col" class="num">Invoice</th><th scope="col" class="num">Compared with</th><th scope="col" class="num">Difference</th><th scope="col" class="num">Tolerance</th></tr></thead>
+        <tbody>
+        {% if c.status == "inconclusive" %}
+          <tr><td colspan="5">Read with low confidence: {{ c.inconclusive_reason }}. A clearer copy or a corrected PO number needs a recheck.</td></tr>
+        {% else %}
+        {% for r in evidence_rows(c) %}
+          <tr>
+            <th scope="row">{{ r.field }}</th>
+            <td class="num invoice-value">{{ r.invoice }}</td>
+            <td class="num"><span class="sub">{{ r.compared_label }}</span>{{ r.compared }}</td>
+            <td class="num{{ ' breaks' if r.breaks }}">{{ r.difference }}</td>
+            <td class="num tolerance">{{ r.tolerance }}</td>
+          </tr>
+        {% endfor %}
+        {% endif %}
+        </tbody>
+      </table>
+      {% endif %}{% endfor %}
+      {% for q in f.citations %}
+      <blockquote class="well"><p>{{ q.quoted_text }}</p><span class="ref">Policy §{{ q.section_id }}, {{ q.title }}</span></blockquote>
+      {% else %}
+      {% if f.exception_type != "FORENSICS_SIGNAL" %}<p class="subline">No applicable policy passage found.</p>{% endif %}
+      {% endfor %}
+      {% if case.invoice.redaction_supported and run %}<p><a href="?page=1&amp;highlight={{ f.id }}#documents">Show on the invoice</a></p>{% endif %}
+
+      {% if f.resolution %}
+      <div class="resolution">
+        <p><strong>{{ RESOLUTION[f.resolution.resolution_type] }}</strong>{% if not f.resolution.valid %} <span class="pill warning">No longer valid</span>{% endif %}: {{ f.resolution.summary }}</p>
+        <p class="digest">Resolution digest {{ copyable(f.resolution.digest, "resolution digest") }}</p>
+      </div>
+      {% endif %}
+
+      {% if is_analyst and case.status == "needs_review" and f.needs_resolution and not f.resolved %}
+        {% if not f.resolvable_by_record %}
+        <p class="notice quiet">Only a recheck can clear this finding{% if f.exception_type == "MISSING_OR_UNKNOWN_PO" %}: request one with the corrected PO number{% endif %}. <a href="#recheck">Request recheck</a></p>
+        {% else %}
+        <details class="disclosure"{% if error_code and request.query_params.get("f") == f.id | string %} open{% endif %}>
+          <summary>Resolve</summary>
+          <div class="body">
+          {% if f.exception_type == "DUPLICATE_INVOICE" %}<p class="notice">Duplicate findings clear only with a vendor confirmation naming both invoices.</p>{% endif %}
+          {% if f.exception_type == "BANK_DETAILS_CHANGED" %}
+            <p class="notice">Bank changes clear only after verification through a trusted channel using vendor-master contact details.</p>
+            {% if case.bank_verifications | length == 0 %}
+            <form method="post" action="/cases/{{ case.id }}/bank-verifications" class="stack">
+              {{ hidden() }}
+              <input type="hidden" name="contact_source" value="vendor_master">
+              <fieldset>
+                <legend>Record a bank verification</legend>
+                <div class="form-field">
+                  <label for="channel-{{ f.id }}">Channel</label>
+                  <select id="channel-{{ f.id }}" name="channel" required>{% for ch in case.bank_channels %}<option value="{{ ch }}">{{ CHANNEL[ch] }}</option>{% endfor %}</select>
+                </div>
+                <div class="form-field">
+                  <span class="label">Contact source</span>
+                  <span>Vendor master{% if case.vendor_address %}: {{ case.vendor_address }}{% endif %}</span>
+                  <span class="help">Never the contact details printed on the invoice.</span>
+                </div>
+                <div class="form-field">
+                  <label for="contact-{{ f.id }}">Contact used</label>
+                  <input id="contact-{{ f.id }}" name="contact_reference" required maxlength="500" autocomplete="off">
+                  <span class="help">Who you spoke to or wrote to, without account numbers.</span>
+                </div>
+                <div class="form-field">
+                  <label for="account-{{ f.id }}">Verified account number</label>
+                  <input id="account-{{ f.id }}" name="verified_account_number" type="password" required autocomplete="off" spellcheck="false">
+                  <span class="help">Reduced to a fingerprint and the last 4 digits on submit; never stored or shown.</span>
+                </div>
+                <div class="form-field">
+                  <label for="letter-{{ f.id }}">Verification evidence</label>
+                  <select id="letter-{{ f.id }}" name="evidence_document_id" required>
+                    {% for s in supporting_by_kind.get("bank_verification", []) %}<option value="{{ s.id }}">{{ s.description }}</option>{% else %}<option value="">Attach a bank verification letter first</option>{% endfor %}
+                  </select>
+                </div>
+              </fieldset>
+              <div class="form-actions"><button type="submit" class="button secondary"{% if not supporting_by_kind.get("bank_verification") %} disabled aria-describedby="letter-why-{{ f.id }}"{% endif %}>Record verification</button></div>
+              {% if not supporting_by_kind.get("bank_verification") %}<p class="reason" id="letter-why-{{ f.id }}">Add the verification letter under Documents first.</p>{% endif %}
+            </form>
+            {% endif %}
+          {% endif %}
+          {% for rule in f.resolution_rules %}
+            {% set missing = [] %}
+            <form method="post" action="/cases/{{ case.id }}/findings/{{ f.id }}/resolutions" class="stack">
+              {{ hidden() }}
+              <input type="hidden" name="resolution_type" value="{{ rule.type }}">
+              <fieldset>
+                <legend>{{ RESOLUTION[rule.type] }}</legend>
+                {% for kind in rule.evidence %}
+                <div class="form-field">
+                  <span class="label">{{ SUPPORTING_KIND[kind] }}</span>
+                  {% if kind == "ledger_invoice_reference" %}
+                    {% set dup = checks | selectattr("check_code", "equalto", "duplicate") | first %}
+                    {% for m in (dup.compared.matches if dup else []) %}
+                    <span class="choice"><input type="checkbox" id="ev-{{ f.id }}-{{ loop.index }}" name="evidence" value="erp:ledger_invoices:{{ m.ledger_invoice_id }}" checked><label for="ev-{{ f.id }}-{{ loop.index }}">Ledger invoice <span class="mono">{{ m.ledger_invoice }}</span></label></span>
+                    {% else %}{% set _ = missing.append(kind) %}<span class="help">No ledger match recorded.</span>{% endfor %}
+                  {% elif kind == "bank_verification_record" %}
+                    {% for v in case.bank_verifications %}
+                    <span class="choice"><input type="checkbox" id="bv-{{ f.id }}-{{ v.id }}" name="evidence" value="bank:{{ v.id }}" checked><label for="bv-{{ f.id }}-{{ v.id }}">{{ CHANNEL[v.channel] }}, account {{ v.account }}</label></span>
+                    {% else %}{% set _ = missing.append(kind) %}<span class="help">Record the bank verification above first.</span>{% endfor %}
+                  {% else %}
+                    {% for s in supporting_by_kind.get(kind, []) %}
+                    <span class="choice"><input type="checkbox" id="sd-{{ f.id }}-{{ rule.type }}-{{ s.id }}" name="evidence" value="supporting:{{ s.id }}"{% if loop.first %} checked{% endif %}><label for="sd-{{ f.id }}-{{ rule.type }}-{{ s.id }}">{{ s.description }}</label></span>
+                    {% else %}{% set _ = missing.append(kind) %}<span class="help">No {{ SUPPORTING_KIND[kind] | lower }} attached yet. Add one under Documents.</span>{% endfor %}
+                  {% endif %}
+                </div>
+                {% endfor %}
+                {% for field in rule.structured %}
+                <div class="form-field">
+                  {% if field == "both_invoice_numbers" %}
+                    <span class="label">{{ STRUCTURED[field] }}</span>
+                    <label class="visually-hidden" for="n1-{{ f.id }}">This invoice's number</label>
+                    <input id="n1-{{ f.id }}" name="structured.both_invoice_numbers" required maxlength="64" autocomplete="off">
+                    <label class="visually-hidden" for="n2-{{ f.id }}">The ledger invoice's number</label>
+                    <input id="n2-{{ f.id }}" name="structured.both_invoice_numbers" required maxlength="64" autocomplete="off">
+                    <span class="help">As written in the vendor's confirmation.</span>
+                  {% elif field == "distinguishing_fact" %}
+                    <label for="fact-{{ f.id }}">{{ STRUCTURED[field] }}</label>
+                    <select id="fact-{{ f.id }}" name="structured.distinguishing_fact" required>
+                      <option value="different_goods">Different goods</option>
+                      <option value="different_period">Different period</option>
+                      <option value="different_po">Different PO</option>
+                    </select>
+                  {% else %}
+                    <label for="{{ field }}-{{ f.id }}-{{ rule.type }}">{{ STRUCTURED[field] }}</label>
+                    <input id="{{ field }}-{{ f.id }}-{{ rule.type }}" name="structured.{{ field }}" required maxlength="64" autocomplete="off"{% if field != "vendor_code" %} inputmode="decimal"{% endif %}>
+                  {% endif %}
+                </div>
+                {% endfor %}
+                <div class="form-field">
+                  <label for="summary-{{ f.id }}-{{ rule.type }}">Summary (not sufficient on its own)</label>
+                  <textarea id="summary-{{ f.id }}-{{ rule.type }}" name="summary" required maxlength="1000"></textarea>
+                </div>
+              </fieldset>
+              <p class="checklist" aria-label="Required evidence">{% for kind in rule.evidence %}<span class="{{ '' if kind in missing else 'done' }}">{{ SUPPORTING_KIND[kind] }} {% if kind in missing %}missing{% else %}{{ icon("check", 12) }}<span class="visually-hidden">attached</span>{% endif %}</span>{% endfor %}</p>
+              <div class="form-actions"><button type="submit" class="button secondary"{% if missing %} disabled aria-describedby="why-{{ f.id }}-{{ rule.type }}"{% endif %}>Record resolution</button></div>
+              {% if missing %}<p class="reason" id="why-{{ f.id }}-{{ rule.type }}">Missing: {% for k in missing %}{{ SUPPORTING_KIND[k] | lower }}{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
+            </form>
+          {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      {% endif %}
+    </article>
+    {% else %}
+      {% if run %}<p>No findings: every check passed.</p>
+      {% elif case.status in ("new", "investigating") %}<p class="subline">Findings appear when the investigation finishes.</p>
+      {% else %}<p class="subline">No findings yet.</p>{% endif %}
+    {% endfor %}
+  </section>
+
+  {# ------------------------------------------------ evidence: the match strip #}
+  <section class="card" id="evidence" aria-labelledby="evidence-title">
+    <div class="card-head"><h2 id="evidence-title">Evidence: line matching</h2><span class="meta">PO · Received · Invoice</span></div>
+    {% if case.match_strip %}
+    <div class="table-scroll">
+    <table class="evidence strip">
+      <caption class="visually-hidden">Each invoice line against its PO line and what was received</caption>
+      <thead><tr><th scope="col">Line</th><th scope="col">Description</th><th scope="col" class="num">PO qty × price</th><th scope="col" class="num">Received</th><th scope="col" class="num">Invoice qty × price</th><th scope="col" class="num">Line total</th><th scope="col">Match</th></tr></thead>
+      <tbody>
+      {% for l in case.match_strip %}
+        <tr>
+          <th scope="row">{{ l.line }}</th>
+          <td>{{ l.description or "—" }}{% if l.po and l.method in ("description", "llm") %}<span class="sub">PO: {{ l.po.description }}</span>{% endif %}</td>
+          <td class="num">{% if l.po %}{{ l.po.quantity | quantity }} × {{ l.po.unit_price | money }}{% else %}<span class="dash">—</span>{% endif %}</td>
+          <td class="num">{{ l.received | quantity }}</td>
+          <td class="num invoice-value">{{ l.quantity | quantity }} × {{ l.unit_price | money }}</td>
+          <td class="num">{{ l.line_total | money }}</td>
+          <td class="method">{{ METHOD.get(l.method, "—") if l.method else "—" }}{% if l.similarity is not none and l.method != "sku" %} {{ "%.2f" | format(l.similarity) }}{% endif %}{% for b in l.breaks %} <span class="pill {{ 'warning' if b.status == 'inconclusive' else 'negative' }} breaks-pill">{{ CHECK[b.check_code] }}</span>{% endfor %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="subline">{{ "Line matching appears when the investigation finishes." if case.status in ("new", "investigating") else "No lines were matched." }}</p>
+    {% endif %}
+  </section>
+
+  {# ------------------------------------------------ documents #}
+  <section class="card" id="documents" aria-labelledby="documents-title">
+    <div class="card-head"><h2 id="documents-title">Documents</h2><span class="meta">Every download is recorded in the audit trail</span></div>
+    <ul class="doc-list" role="list">
+      <li><a class="button ghost" href="/api/v1/documents/{{ case.invoice.document_id }}">{{ icon("download") }}Invoice original</a></li>
+      {% for s in case.supporting_documents %}<li><a class="button ghost" href="/api/v1/documents/{{ s.document_id }}">{{ icon("download") }}{{ SUPPORTING_KIND[s.kind] }}{% if s.notice %} (scan, not redacted){% endif %}</a></li>{% endfor %}
+    </ul>
+    {% if case.invoice.notice %}<p class="notice"><strong>Not redacted.</strong> {{ case.invoice.notice }}</p>
+    {% elif run %}
+      {% set page_no = request.query_params.get("page", "1") %}
+      {% set hl = request.query_params.get("highlight") %}
+      {% if (case.invoice.page_count or 1) > 1 %}<p class="subline">Page {% for n in range(1, (case.invoice.page_count or 1) + 1) %}<a href="?page={{ n }}{% if hl %}&amp;highlight={{ hl }}{% endif %}#documents"{% if page_no == n | string %} aria-current="page"{% endif %}>{{ n }}</a> {% endfor %}</p>{% endif %}
+      <img class="page-view" src="/api/v1/documents/{{ case.invoice.document_id }}/pages/{{ page_no | int }}.png{% if hl %}?highlight=finding:{{ hl }}{% endif %}" alt="Page {{ page_no }} of the invoice{% if hl %}, with the selected finding's evidence boxed{% endif %}; bank numbers are blacked out" width="1224" height="1584" loading="lazy">
+    {% else %}<p class="subline">The page preview appears once the document has been read.</p>{% endif %}
+    {% if is_analyst and case.status == "needs_review" %}
+    <details class="disclosure">
+      <summary>Add supporting document</summary>
+      <form class="body stack" method="post" action="/cases/{{ case.id }}/supporting-documents" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-field"><label for="sd-kind">Kind</label><select id="sd-kind" name="kind" required>{% for k in supporting_kinds %}<option value="{{ k.value }}">{{ SUPPORTING_KIND[k.value] }}</option>{% endfor %}</select></div>
+        <div class="form-field"><label for="sd-description">Description</label><input id="sd-description" name="description" required maxlength="1000"><span class="help">For example the credit note's number and amount.</span></div>
+        <div class="form-field"><label for="sd-file">File (PDF, PNG or JPEG)</label><input id="sd-file" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required></div>
+        <div class="form-actions"><button type="submit" class="button secondary">Attach document</button></div>
+      </form>
+    </details>
+    {% endif %}
+  </section>
+
+  {# ------------------------------------------------ run trace #}
+  {% if trace %}
+  <section class="card" aria-labelledby="trace-title">
+    <details class="disclosure">
+      <summary><h2 id="trace-title">Run trace</h2></summary>
+      <div class="body stack">
+        <p class="subline">Run {{ trace.run.attempt }} ({{ trace.run.kind }}) · {{ trace.run.status }}{% if trace.run.model %} · {{ trace.run.model }}{% endif %}{% if trace.run.execution_ms is not none %} · {{ (trace.run.execution_ms / 1000) | round(1) }} s working{% endif %}{% if trace.run.quota_wait_ms %} · {{ (trace.run.quota_wait_ms / 1000) | round(1) }} s waiting for AI quota{% endif %}</p>
+        <ol class="progress">{% for s in trace.steps %}<li class="{{ 'done' if s.done }}">{{ s.step | replace("_", " ") | capitalize }}{% if s.counts %} ({% for k, v in s.counts.items() %}{{ v }} {{ k }}{{ ", " if not loop.last }}{% endfor %}){% endif %}</li>{% endfor %}</ol>
+        {% if trace.llm_calls %}
+        <table class="evidence">
+          <caption class="visually-hidden">AI calls in this run</caption>
+          <thead><tr><th scope="col">AI call</th><th scope="col">Model</th><th scope="col" class="num">Tokens in / out</th><th scope="col" class="num">Working</th><th scope="col" class="num">Quota wait</th></tr></thead>
+          <tbody>{% for c in trace.llm_calls %}<tr><th scope="row">{{ c.purpose | capitalize }}{% if c.status != "ok" %} ({{ c.status }}){% endif %}</th><td>{{ c.model }}</td><td class="num">{{ c.tokens_in }} / {{ c.tokens_out }}</td><td class="num">{{ c.latency_ms }} ms</td><td class="num">{{ c.quota_wait_ms }} ms</td></tr>{% endfor %}</tbody>
+        </table>
+        {% else %}<p class="subline">No AI calls in this run.</p>{% endif %}
+        {% for t in trace.tool_calls %}<div class="well"><strong>{{ t.name }}</strong> <span class="mono">{{ t.args | tojson }}</span></div>{% endfor %}
+        {% for e in trace.errors %}<p class="notice error">{{ e.source }}: {{ e.reason }}</p>{% endfor %}
+        {% set digest = audit.evidence_digests.get(trace.run.id | string) %}
+        {% if digest %}<p>Evidence digest {{ copyable(digest, "evidence digest") }}</p>{% endif %}
+      </div>
+    </details>
+  </section>
+  {% endif %}
+
+  {# ------------------------------------------------ audit trail #}
+  <section class="card" aria-labelledby="audit-title">
+    <details class="disclosure"{% if audit.verification and (not audit.verification.chain_ok or not audit.verification.evidence_ok) %} open{% endif %}>
+      <summary><h2 id="audit-title">Audit trail</h2></summary>
+      <div class="body stack">
+        {% set v = audit.verification %}
+        {% if not v %}
+          <p class="notice quiet">Not verified yet: <span class="mono">opspilot audit verify</span> hasn't run.</p>
+        {% elif not v.chain_ok or not v.evidence_ok %}
+          <p class="notice error" role="alert">Verification failed {{ v.verified_at | ago }} ({{ v.verified_at | iso }}).{% for x in v.case_failures %} {{ x }}.{% endfor %}</p>
+        {% else %}
+          <p>Chain verified {{ v.verified_at | ago }} ({{ v.verified_at | iso }}), through event {{ v.verified_through_seq }}.</p>
+        {% endif %}
+        {% if v and v.overdue %}<p class="notice" role="status">The daily check is overdue: the last verification was {{ v.verified_at | ago }}.</p>{% endif %}
+        {% if v and not v.covers_all_case_events %}<p class="notice">Events after the last verification are unchecked.</p>{% endif %}
+        {% if v %}<p class="subline">{{ v.statement }}</p>{% endif %}
+        <table class="evidence">
+          <caption class="visually-hidden">Audit events for this case</caption>
+          <thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">By</th><th scope="col">Hash</th></tr></thead>
+          <tbody>{% for e in audit["items"] %}<tr><td><time datetime="{{ e.occurred_at.isoformat() }}">{{ e.occurred_at | iso }}</time></td><td>{{ e.event_type | replace(".", " ") | replace("_", " ") }}{% if e.payload.transition %} ({{ e.payload.transition }}){% endif %}{% if e.payload.reason %}: {{ e.payload.reason }}{% endif %}</td><td>{{ e.actor_name or "OpsPilot" }}</td><td class="mono">{{ e.hash[:10] }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+</div>
+
+{# ------------------------------------------------ decision panel #}
+<aside class="decision" id="decision" aria-label="Decision">
+  <section class="card proposal" aria-labelledby="proposal-title">
+    <h2 id="proposal-title">Proposal</h2>
+    {% if proposal %}
+      <p class="action">{{ ACTION[proposal.action] }}</p>
+      <p class="source">{% if proposal.source == "agent" %}Proposed by OpsPilot{% else %}Changed by {{ proposal.changed_by.display_name }}: “{{ proposal.reason }}”{% endif %}</p>
+    {% else %}<p class="subline">{{ "OpsPilot proposes an action when the investigation finishes." if case.status in ("new", "investigating") else "No proposal." }}</p>{% endif %}
+    {% if "change_proposal" in case.operations %}
+    <form method="post" action="/cases/{{ case.id }}/proposal" class="stack">
+      {{ hidden() }}
+      <fieldset class="form-field">
+        <legend>Change to</legend>
+        {% for a in case.allowed_actions %}<span class="choice"><input type="radio" id="act-{{ a }}" name="action" value="{{ a }}" required{% if proposal and proposal.action == a %} checked{% endif %}><label for="act-{{ a }}">{{ ACTION[a] }}</label></span>{% endfor %}
+      </fieldset>
+      {% if "approve_for_payment" not in case.allowed_actions %}<p class="reason">Approve payment unavailable: {% if inconclusive %}{{ inconclusive | length }} check inconclusive{% else %}{{ unresolved | length }} {{ "finding" if unresolved | length == 1 else "findings" }} unresolved{% endif %}.</p>{% endif %}
+      {{ reason_field("proposal-reason", "Reason") }}
+      <div class="form-actions"><button type="submit" class="button secondary">Save proposal</button></div>
+    </form>
+    {% endif %}
+  </section>
+
+  <section class="card" aria-labelledby="next-title">
+    <h2 id="next-title">Next step</h2>
+    {% if case.status in ("new", "investigating") %}
+      {% include "_progress.html" %}
+    {% elif case.status == "investigation_failed" %}
+      <p>{{ case.latest_run.failure_reason if case.latest_run else "The investigation failed." }}</p>
+      {% if "investigate" in case.operations %}
+      <form method="post" action="/cases/{{ case.id }}/investigate" class="form-actions">{{ hidden() }}<button type="submit" class="button primary wide">Retry investigation</button></form>
+      {% endif %}
+      {% if "dismiss" in case.operations %}
+      <details class="disclosure"><summary>Close with reason</summary>
+        <form method="post" action="/cases/{{ case.id }}/dismiss" class="body">{{ hidden() }}{{ reason_field("close-reason", "Why close it without action") }}<div class="form-actions"><button type="submit" class="button danger">Close case without action</button></div></form>
+      </details>
+      {% endif %}
+    {% elif case.status == "needs_review" %}
+      {% if is_analyst %}
+        {% if proposal %}
+        <form method="post" action="/cases/{{ case.id }}/submit">{{ hidden() }}<button type="submit" class="button primary wide">{{ ACTION_SUBMIT[proposal.action] }}{% if inv.total %} ({{ inv.total | money }}){% endif %}</button></form>
+        {% endif %}
+        <details class="disclosure" id="recheck"><summary>Request recheck</summary>
+          <form method="post" action="/cases/{{ case.id }}/recheck" class="body">{{ hidden() }}{{ reason_field("recheck-reason", "Why recheck") }}
+            <div class="form-field"><label for="po-number">Corrected PO number (optional)</label><input id="po-number" name="po_number" maxlength="64" autocomplete="off"></div>
+            {% set copies = supporting_by_kind.get("invoice_copy", []) %}
+            {% if copies %}<div class="form-field"><label for="replacement">Clearer copy (optional)</label><select id="replacement" name="replacement_document_id"><option value="">None</option>{% for s in copies %}<option value="{{ s.id }}">{{ s.description }}</option>{% endfor %}</select></div>{% endif %}
+            <div class="form-actions"><button type="submit" class="button secondary">Recheck the invoice</button></div></form>
+        </details>
+        <details class="disclosure"><summary>Dismiss with reason</summary>
+          <form method="post" action="/cases/{{ case.id }}/dismiss" class="body">{{ hidden() }}{{ reason_field("dismiss-reason", "Why close it without action") }}<div class="form-actions"><button type="submit" class="button danger">Dismiss: close without action</button></div></form>
+        </details>
+      {% else %}<p class="subline">With the analyst for review.</p>{% endif %}
+    {% elif case.status == "pending_approval" %}
+      {% if is_approver %}
+        {% if "approve" in case.operations %}
+          {% if paying %}<p>Accept each resolution in the <a href="#review">review</a>, then approve.</p>
+          {% else %}<form method="post" action="/cases/{{ case.id }}/approve">{{ hidden() }}<button type="submit" class="button primary wide">Approve: {{ ACTION[proposal.action] | lower }}</button></form>{% endif %}
+        {% elif case.blocked.approve %}
+          <button type="button" class="button wide" disabled aria-describedby="approve-why">Approve</button>
+          <p class="reason" id="approve-why">{{ ERROR_WORDS.get(case.blocked.approve, "You can't approve this case.") }}</p>
+        {% endif %}
+        <details class="disclosure"><summary>Decline with reason</summary>
+          <form method="post" action="/cases/{{ case.id }}/decline" class="body">{{ hidden() }}{{ reason_field("decline-reason", "Why decline") }}<div class="form-actions"><button type="submit" class="button secondary">Decline and return to the analyst</button></div></form>
+        </details>
+      {% else %}<p>Waiting for approver · {{ (case.required_approver_tier or "standard") | capitalize }} tier</p>{% endif %}
+    {% elif case.status == "held_for_approver" %}
+      <p>Held: no approver with authority is active for {{ case.required_approval_amount | money }}.</p>
+    {% elif case.status == "approved" %}
+      <p>Executing the approved action…</p>
+    {% elif case.status == "closed" %}
+      {% if case.outcome %}<p>{{ {"approve_for_payment": "Paid", "place_on_hold": "Placed on hold", "reject_invoice": "Rejected", "draft_vendor_query": "Vendor query drafted"}[case.outcome.action] }}{% if case.outcome.approved_by %} by approval of {{ case.outcome.approved_by.display_name }}{% endif %}, {{ case.outcome.executed_at | iso }}.</p>
+      {% else %}{% set last = case.decisions | selectattr("kind", "equalto", "dismiss") | list | last %}<p>Dismissed{% if last %} by {{ last.actor.display_name }}: “{{ last.reason }}”{% endif %}.</p>{% endif %}
+      {% if "reopen" in case.operations %}
+      <details class="disclosure"><summary>Reopen with reason</summary>
+        <form method="post" action="/cases/{{ case.id }}/reopen" class="body">{{ hidden() }}{{ reason_field("reopen-reason", "Why reopen") }}<div class="form-actions"><button type="submit" class="button danger">Reverse the action and reopen</button></div></form>
+      </details>
+      {% endif %}
+    {% endif %}
+    {% if user.role == "auditor" %}<p class="subline">Auditors can read everything and change nothing.</p>{% endif %}
+  </section>
+
+  {% if case.decisions %}
+  <section class="card" aria-labelledby="history-title">
+    <h2 id="history-title">History</h2>
+    <ol class="progress">{% for d in case.decisions %}<li>{{ DECISION[d.kind] }}{% if d.actor %} by {{ d.actor.display_name }}{% endif %} · <time datetime="{{ d.created_at.isoformat() }}">{{ d.created_at | relative }}</time>{% if d.reason %}: “{{ d.reason }}”{% endif %}</li>{% endfor %}</ol>
+  </section>
+  {% endif %}
+</aside>
+</div>
 {% endblock %}

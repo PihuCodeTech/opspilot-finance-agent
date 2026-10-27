@@ -1,0 +1,64 @@
+{# Shared pieces. Icons are 16px outline at 1.5px stroke, one set, in currentColor. #}
+{% macro icon(name, size=16) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{%- if name == "cases" %}<path d="M3 2.5h7l3 3v8H3z"/><path d="M10 2.5v3h3M5.5 8.5h5M5.5 11h3.5"/>
+{%- elif name == "approvals" %}<path d="M2.5 8.5l3 3 8-8"/><path d="M2.5 13.5h11"/>
+{%- elif name == "held" %}<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M6.5 5.5v5M9.5 5.5v5"/>
+{%- elif name == "upload" %}<path d="M8 10.5V2.5M5 5.5l3-3 3 3"/><path d="M2.5 10.5v3h11v-3"/>
+{%- elif name == "sun" %}<circle cx="8" cy="8" r="2.75"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/>
+{%- elif name == "moon" %}<path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/>
+{%- elif name == "cube" %}<path d="M8 1.75l5.5 3v6.5L8 14.25l-5.5-3v-6.5z"/><path d="M2.5 4.75L8 7.75l5.5-3M8 7.75v6.5"/>
+{%- elif name == "menu" %}<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+{%- elif name == "copy" %}<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>
+{%- elif name == "check" %}<path d="M3 8.5l3 3 7-7"/>
+{%- elif name == "download" %}<path d="M8 2.5v8M5 7.5l3 3 3-3"/><path d="M2.5 13.5h11"/>
+{%- endif %}
+</svg>
+{%- endmacro %}
+
+{# The product mark: PO, receipt and invoice as three stacked bars, the invoice offset. #}
+{% macro mark(size=20) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="1.5" y="2" width="11" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="1.5" y="8" width="11" height="4" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="7" y="14" width="11.5" height="4" rx="1" fill="currentColor"/></svg>
+{%- endmacro %}
+
+{% macro pill(status, outcome=None) -%}
+{%- set p = status_pill(status, outcome) -%}
+<span class="pill {{ p.tone }}">{% if p.glyph %}<span aria-hidden="true">{{ p.glyph }}</span>{% endif %}{{ p.label }}</span>
+{%- endmacro %}
+
+{% macro copyable(value, label) -%}
+<span class="copy"><code title="{{ value }}">{{ value[:12] }}…</code><button type="button" class="icon-button" data-copy="{{ value }}" aria-label="Copy {{ label }}">{{ icon("copy", 14) }}</button><span class="visually-hidden" aria-live="polite" data-copied></span></span>
+{%- endmacro %}
+
+{% macro nav(user, path, nav_counts) -%}
+<nav class="nav" aria-label="Main">
+  <a href="/"{% if path == "/" or path.startswith("/cases") %} aria-current="page"{% endif %}>{{ icon("cases") }}Cases</a>
+  {% if user.role == "approver" %}
+  <a href="/approvals"{% if path == "/approvals" and not request.query_params.get("status") %} aria-current="page"{% endif %}>{{ icon("approvals") }}Approvals{% if nav_counts.mine %}<span class="count">{{ nav_counts.mine }}</span>{% endif %}</a>
+  {% if nav_counts.held %}
+  <a href="/approvals?status=held_for_approver"{% if request.query_params.get("status") == "held_for_approver" %} aria-current="page"{% endif %}>{{ icon("held") }}Held<span class="count">{{ nav_counts.held }}</span></a>
+  {% endif %}
+  {% endif %}
+  {% if user.role == "analyst" %}
+  <a href="/uploads/new"{% if path == "/uploads/new" %} aria-current="page"{% endif %}>{{ icon("upload") }}Upload invoice</a>
+  {% endif %}
+</nav>
+{%- endmacro %}
+
+{% macro prefs(theme, views_3d, here, up=True) -%}
+<div class="tools">
+  <details class="menu">
+    <summary class="icon-button" aria-label="Theme: {{ (theme or 'system') | capitalize }}">{{ icon("moon" if theme == "dark" else "sun") }}</summary>
+    <form class="menu-panel" method="get" action="/preferences">
+      <input type="hidden" name="next" value="{{ here }}">
+      {% for value, label in [("light", "Light"), ("dark", "Dark"), ("system", "System")] %}
+      <button type="submit" name="theme" value="{{ value }}"{% if (theme or "system") == value %} aria-current="true"{% endif %}><span class="check" aria-hidden="true">{% if (theme or "system") == value %}{{ icon("check", 14) }}{% endif %}</span>{{ label }}</button>
+      {% endfor %}
+    </form>
+  </details>
+  <form method="get" action="/preferences">
+    <input type="hidden" name="next" value="{{ here }}">
+    <button type="submit" class="icon-button" name="views3d" value="{{ 'off' if views_3d else 'on' }}" aria-label="3D views: {{ 'On' if views_3d else 'Off' }}" aria-pressed="{{ 'true' if views_3d else 'false' }}">{{ icon("cube") }}</button>
+  </form>
+</div>
+{%- endmacro %}

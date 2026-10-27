@@ -7,6 +7,7 @@ with a generic message. Validation details name fields, never echo values.
 """
 
 import datetime as dt
+import re
 import uuid
 from decimal import Decimal
 from enum import Enum
@@ -86,6 +87,9 @@ def _error(
     if wants_html(request):
         if status == 401:  # noqa: PLR2004
             return RedirectResponse("/login", status_code=303)
+        back = _form_origin(request, status)
+        if back is not None:
+            return RedirectResponse(f"{back}?error={code}", status_code=303)
         templates: Jinja2Templates = request.app.state.templates
         return templates.TemplateResponse(
             request,
@@ -97,6 +101,24 @@ def _error(
     return JSONResponse(
         error_body(request, code, message, details), status_code=status, headers=headers
     )
+
+
+_CASE_FORM = re.compile(r"^/cases/([0-9a-f-]{36})/[a-z-]+(/[0-9a-f-]{36}/[a-z]+)?$")
+
+
+def _form_origin(request: Request, status: int) -> str | None:
+    """A failed form post goes back to its page with the error code, to be shown inline.
+
+    Only the code travels (`?error=stale_version`); the page words it from a fixed list,
+    so nothing the request carried is ever reflected.
+    """
+    if request.method != "POST" or status == 404:  # noqa: PLR2004
+        return None
+    path = request.url.path
+    if path == "/uploads":
+        return "/uploads/new"
+    match = _CASE_FORM.match(path)
+    return f"/cases/{match.group(1)}" if match else None
 
 
 def _field_errors(exc: RequestValidationError) -> list[dict[str, str]]:

@@ -5,7 +5,6 @@ its own (see `.workflow/09-tasks.md`). Unimplemented commands exit with code 2.
 """
 
 import argparse
-import datetime as dt
 import signal
 import sys
 import threading
@@ -15,11 +14,9 @@ from types import FrameType
 
 import structlog
 from sqlalchemy import Engine
-from sqlalchemy import text as sql
 
 from opspilot.agent.runtime import build_agent, checkpoint_saver, run_slice
-from opspilot.audit.verify import record as record_verification
-from opspilot.audit.verify import verify as verify_audit
+from opspilot.audit.verify import verify_and_record
 from opspilot.config import LlmMode, get_settings
 from opspilot.db.roles import RoleProvisioningError, provision_roles
 from opspilot.db.seed import seed
@@ -120,6 +117,7 @@ def _worker(args: argparse.Namespace) -> int:
             job_engine,
             retention_days=settings.checkpoint_retention_days,
             delete_thread=agent.delete_thread,
+            verify_audit=lambda: verify_and_record(get_verifier_engine(), job_engine),
         )
 
     worker = Worker(
@@ -420,20 +418,7 @@ def _audit_verify(_args: argparse.Namespace) -> int:
     The records are read as the read-only verifier role; the result is then
     stored (append-only) by the app role, so the case page can show it.
     """
-    engine = get_verifier_engine()
-    started = dt.datetime.now(dt.UTC)
-    with engine.connect().execution_options(isolation_level="REPEATABLE READ") as conn:
-        verified_as = str(conn.execute(sql("SELECT current_user")).scalar_one())
-        report = verify_audit(conn)
-        conn.rollback()
-    with get_engine().begin() as conn:
-        record_verification(
-            conn,
-            report,
-            started_at=started,
-            finished_at=dt.datetime.now(dt.UTC),
-            verified_as=verified_as,
-        )
+    report = verify_and_record(get_verifier_engine(), get_engine())
     lines = [
         f"chain {c.chain_id}: {c.events} events, head seq {c.head_seq} {c.head_hash.hex()}"
         f" [{'ok' if c.error is None else 'BROKEN at ' + c.error}]"

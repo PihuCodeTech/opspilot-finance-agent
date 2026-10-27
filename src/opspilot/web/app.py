@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from opspilot.config import Settings, get_settings
 from opspilot.db.session import check_readiness, get_engine
 from opspilot.logs import configure_logging
-from opspilot.web import errors
+from opspilot.web import errors, present
 from opspilot.web.db import TransactionFactory, engine_transactions
 from opspilot.web.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from opspilot.web.ratelimit import RateLimiter
@@ -23,6 +23,8 @@ from opspilot.web.routes import cases, documents, ui
 
 _WEB_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=_WEB_DIR / "templates")
+templates.env.filters.update(present.filters())
+templates.env.globals.update(present.globals_())
 # Multipart framing and the form's text fields, on top of the largest file allowed.
 FORM_OVERHEAD_BYTES = 64 * 1024
 

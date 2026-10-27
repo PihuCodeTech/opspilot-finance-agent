@@ -8,6 +8,7 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import Engine, text
 
+from opspilot.audit.verify import VerifyReport
 from opspilot.domain.enums import JobStatus, JobType
 from opspilot.jobs.queue import Job, backoff, claim, enqueue, fail
 from opspilot.jobs.worker import PauseJob, Worker, cleanup
@@ -160,3 +161,21 @@ def test_cleanup_is_idempotent(engine: Engine) -> None:
     second = cleanup(engine, retention_days=30, delete_thread=deleted.append)
     assert second.released == 0  # anything releasable went the first time
     assert first.threads_deleted == second.threads_deleted  # deleting again is harmless
+
+
+def test_cleanup_runs_the_audit_check_and_never_hides_a_failure(
+    engine: Engine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ok = cleanup(engine, retention_days=30, verify_audit=VerifyReport)
+    assert ok.verified is True
+    broken = VerifyReport(mismatches=["run x: evidence does not match its digest"])
+    failed = cleanup(engine, retention_days=30, verify_audit=lambda: broken)
+    assert failed.verified is False
+    assert "audit.verify_failed" in capsys.readouterr().out
+
+    def unavailable() -> VerifyReport:
+        raise RuntimeError("DATABASE_URL_VERIFIER is not set")
+
+    skipped = cleanup(engine, retention_days=30, verify_audit=unavailable)
+    assert skipped.verified is None  # not run is not a pass
+    assert "audit.verify_not_run" in capsys.readouterr().out

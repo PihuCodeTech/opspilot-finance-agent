@@ -105,6 +105,7 @@ markers = [
   "integration: needs a real PostgreSQL (TEST_DATABASE_URL); skipped when it isn't set",
   "docling: runs Docling on real PDFs (downloads its models on first use; a few seconds each)",
   "models: loads the local embedding model (downloads it on first use)",
+  "e2e: browser journeys with Playwright against a live server (needs TEST_DATABASE_URL and Chrome or Playwright's Chromium)",
 ]
 
 [dependency-groups]
@@ -112,6 +113,7 @@ dev = [
     "httpx2>=2.16.0",
     "hypothesis>=6.170.9",
     "mypy>=2.4.0",
+    "playwright==1.63.0",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
 ]

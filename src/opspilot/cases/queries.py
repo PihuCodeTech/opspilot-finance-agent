@@ -22,7 +22,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import Connection, func, or_, select, text, tuple_
+from sqlalchemy import Connection, and_, func, or_, select, text, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 
 from opspilot.cases import service
@@ -46,9 +46,13 @@ from opspilot.db.models import (
     FindingResolutionEvidence,
     InvestigationRun,
     Invoice,
+    Job,
+    LineMatch,
     LlmCall,
     PolicyChunk,
+    PoLine,
     Proposal,
+    ReceiptLine,
     SupportingDocument,
     User,
     Vendor,
@@ -109,6 +113,7 @@ def _time_id_cursor(cursor: str | None) -> tuple[dt.datetime, uuid.UUID] | None:
 class Page:
     items: list[dict[str, Any]]
     next_cursor: str | None
+    total: int | None = None  # rows matching the filters, when the caller asked for it
 
 
 # ---------------------------------------------------------------- masking
@@ -252,6 +257,8 @@ def _summaries(conn: Connection, cases: list[dict[str, Any]]) -> list[dict[str, 
         )
     }
     proposals = _current_proposals(conn, [c["id"] for c in cases])
+    people = _users(conn, [c["submitted_by"] for c in cases])
+    outcomes = _outcomes(conn, [c["id"] for c in cases if c["status"] == S.CLOSED])
     items = []
     for case in cases:
         run_id = case["evidence_run_id"]
@@ -268,17 +275,42 @@ def _summaries(conn: Connection, cases: list[dict[str, Any]]) -> list[dict[str, 
                 else None,
                 "vendor_name_read": data.get("vendor_name"),
                 "invoice_number": data.get("invoice_number"),
+                "po_number": data.get("po_number"),
                 "total": data.get("total"),
                 "finding_types": findings.get(run_id, []),
                 "proposed_action": proposal["action"] if proposal else None,
                 "required_approval_amount": case["required_approval_amount"],
                 "required_approver_tier": case["required_approver_tier"],
+                "submitted_by": people.get(case["submitted_by"]),
+                "submitted_at": case["submitted_at"],
+                "outcome": (outcomes.get(case["id"]) or {}).get("action"),
                 "created_at": case["created_at"],
                 "updated_at": case["updated_at"],
                 "version": case["version"],
             }
         )
     return items
+
+
+def _outcomes(conn: Connection, case_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict[str, Any]]:
+    """The executed, unreversed action of each closed case (a dismissed case has none)."""
+    if not case_ids:
+        return {}
+    rows = conn.execute(
+        select(
+            ExecutedAction.case_id,
+            ExecutedAction.action,
+            ExecutedAction.executed_at,
+            Decision.actor_id,
+        )
+        .join(Decision, Decision.id == ExecutedAction.decision_id)
+        .outerjoin(ActionReversal, ActionReversal.executed_action_id == ExecutedAction.id)
+        .where(ExecutedAction.case_id.in_(case_ids), ActionReversal.id.is_(None))
+    ).all()
+    return {
+        r.case_id: {"action": r.action, "executed_at": r.executed_at, "approved_by": r.actor_id}
+        for r in rows
+    }
 
 
 def _current_proposals(
@@ -317,14 +349,32 @@ def list_cases(  # the documented query parameters
     status: CaseStatus | None = None,
     exception_type: FindingCode | None = None,
     vendor_id: uuid.UUID | None = None,
+    q: str | None = None,
+    oldest_first: bool = False,
     limit: int | None = None,
     cursor: str | None = None,
 ) -> Page:
-    """The live queue, newest first. Evaluation cases never appear."""
+    """The live queue, newest first (or oldest first). Evaluation cases never appear.
+
+    `q` finds an invoice or PO number as read from the document (a substring, any case).
+    """
     require_reader(actor)
     query = select(Case.__table__).where(Case.eval_run_id.is_(None))
     if status is not None:
         query = query.where(Case.status == status)
+    if q is not None and q.strip():
+        needle = "%" + _like_escape(q.strip()[:SEARCH_MAX]) + "%"
+        query = query.where(
+            select(Extraction.id)
+            .where(
+                Extraction.run_id == Case.evidence_run_id,
+                or_(
+                    Extraction.data["invoice_number"].astext.ilike(needle, escape="\\"),
+                    Extraction.data["po_number"].astext.ilike(needle, escape="\\"),
+                ),
+            )
+            .exists()
+        )
     if exception_type is not None:
         query = query.where(
             select(Finding.id)
@@ -341,7 +391,144 @@ def list_cases(  # the documented query parameters
             )
             .exists()
         )
-    return _page(conn, query, page_limit(limit), cursor)
+    page = _page(conn, query, page_limit(limit), cursor, newest_first=not oldest_first)
+    total = conn.execute(select(func.count()).select_from(query.subquery())).scalar_one()
+    return Page(page.items, page.next_cursor, int(total))
+
+
+SEARCH_MAX = 64
+
+
+def queue_vendors(conn: Connection, actor: Actor) -> list[dict[str, Any]]:
+    """Vendors identified on live cases, for the queue's vendor filter."""
+    require_reader(actor)
+    runs = conn.execute(
+        select(Case.evidence_run_id).where(
+            Case.eval_run_id.is_(None), Case.evidence_run_id.is_not(None)
+        )
+    ).scalars()
+    ids = set(_vendor_ids(conn, [r for r in runs if r is not None]).values())
+    rows = conn.execute(
+        select(Vendor.id, Vendor.name).where(Vendor.id.in_(ids)).order_by(Vendor.name)
+    ).all()
+    return [{"id": r.id, "name": r.name} for r in rows]
+
+
+PROGRESS_STEPS = (
+    ("records", "Gathering records"),
+    ("extract", "Reading document"),
+    ("match", "Matching lines"),
+    ("checks", "Running checks"),
+    ("policy", "Consulting policy"),
+    ("explain", "Explaining"),
+)
+
+
+def progress(conn: Connection, actor: Actor, case_id: uuid.UUID) -> dict[str, Any]:
+    """Where the latest run has got to, read from what it has written, and any quota wait."""
+    require_reader(actor)
+    case = require_live_case(conn, case_id)
+    run = conn.execute(
+        select(InvestigationRun.__table__)
+        .where(InvestigationRun.case_id == case_id)
+        .order_by(InvestigationRun.attempt.desc())
+        .limit(1)
+    ).first()
+    done: set[str] = set()
+    if run is not None:
+
+        def wrote(model: Any) -> bool:
+            return (
+                conn.execute(select(model.id).where(model.run_id == run.id).limit(1)).first()
+                is not None
+            )
+
+        if wrote(Extraction):
+            done |= {"records", "extract"}
+        if wrote(LineMatch):
+            done.add("match")
+        if wrote(CheckResult):
+            done.add("checks")
+        if conn.execute(
+            select(LlmCall.id)
+            .where(LlmCall.run_id == run.id, LlmCall.purpose == "investigate")
+            .limit(1)
+        ).first():
+            done.add("policy")
+        if wrote(Finding) or wrote(Proposal):
+            done |= {"policy", "explain"}
+    current = next((key for key, _ in PROGRESS_STEPS if key not in done), None)
+    waiting = conn.execute(
+        select(Job.run_after)
+        .where(
+            Job.case_id == case_id,
+            Job.status == "queued",
+            Job.run_after > func.now(),
+            Job.last_error.ilike("%quota%"),
+        )
+        .order_by(Job.run_after)
+        .limit(1)
+    ).scalar()
+    return {
+        "status": case["status"],
+        "version": case["version"],
+        "steps": [
+            {"key": key, "label": label, "done": key in done, "current": key == current}
+            for key, label in PROGRESS_STEPS
+        ],
+        "quota_resumes_at": waiting,
+    }
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def queue_counts(conn: Connection, actor: Actor) -> dict[str, int]:
+    """Live cases per status, for the queue's subline and filters."""
+    require_reader(actor)
+    rows = conn.execute(
+        select(Case.status, func.count()).where(Case.eval_run_id.is_(None)).group_by(Case.status)
+    ).all()
+    return {str(status): int(count) for status, count in rows}
+
+
+def _approvable(actor: Actor) -> Any:
+    """Pending cases this approver may approve: tier and limit, never their own submission."""
+    rule = and_(
+        Case.eval_run_id.is_(None),
+        Case.status == S.PENDING_APPROVAL,
+        or_(Case.submitted_by.is_(None), Case.submitted_by != actor.id),
+    )
+    if actor.approval_unlimited:
+        return rule
+    return and_(
+        rule,
+        Case.required_approver_tier == ApproverTier.STANDARD,
+        Case.required_approval_amount.is_not(None),
+        Case.required_approval_amount <= (actor.approval_limit or 0),
+    )
+
+
+def approval_counts(conn: Connection, actor: Actor) -> dict[str, Any]:
+    """What waits for this approver, what needs someone else, and what is held."""
+    if actor.role is not UserRole.APPROVER:
+        return {"mine": 0, "others": 0, "held": 0, "oldest_submitted_at": None}
+    mine = conn.execute(
+        select(func.count(), func.min(Case.submitted_at)).where(_approvable(actor))
+    ).one()
+    pending = conn.execute(
+        select(func.count()).where(Case.eval_run_id.is_(None), Case.status == S.PENDING_APPROVAL)
+    ).scalar_one()
+    held = conn.execute(
+        select(func.count()).where(Case.eval_run_id.is_(None), Case.status == S.HELD_FOR_APPROVER)
+    ).scalar_one()
+    return {
+        "mine": int(mine[0]),
+        "others": int(pending) - int(mine[0]),
+        "held": int(held),
+        "oldest_submitted_at": mine[1],
+    }
 
 
 def list_approvals(
@@ -354,20 +541,11 @@ def list_approvals(
 ) -> Page:
     """Cases this approver may approve; or, with `held`, the held cases (read-only)."""
     require_role(actor, UserRole.APPROVER)
-    query = select(Case.__table__).where(Case.eval_run_id.is_(None))
+    query = select(Case.__table__)
     if held:
-        query = query.where(Case.status == S.HELD_FOR_APPROVER)
+        query = query.where(Case.eval_run_id.is_(None), Case.status == S.HELD_FOR_APPROVER)
     else:
-        query = query.where(
-            Case.status == S.PENDING_APPROVAL,
-            or_(Case.submitted_by.is_(None), Case.submitted_by != actor.id),
-        )
-        if not actor.approval_unlimited:
-            query = query.where(
-                Case.required_approver_tier == ApproverTier.STANDARD,
-                Case.required_approval_amount.is_not(None),
-                Case.required_approval_amount <= (actor.approval_limit or 0),
-            )
+        query = query.where(_approvable(actor))
     return _page(conn, query, page_limit(limit), cursor, newest_first=False)
 
 
@@ -490,6 +668,17 @@ def _findings(conn: Connection, state: EvidenceState) -> list[dict[str, Any]]:
             "resolvable_by_record": f.row["id"] in needing and f.code not in recheck_only,
             "resolved": f.resolution_valid and f.code not in recheck_only,
             "resolution": _resolution_view(conn, f),
+            # What a resolution of this finding must carry, from the policy (forms are built
+            # from it; the server re-checks everything).
+            "resolution_rules": [
+                {
+                    "type": rule.type,
+                    "evidence": list(rule.evidence),
+                    "structured": list(rule.structured),
+                }
+                for rule in state.policy.resolutions.rules
+                if rule.finding is f.code
+            ],
         }
         for f in state.findings
     ]
@@ -592,6 +781,69 @@ def _invoice(conn: Connection, case: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _match_strip(conn: Connection, run_id: uuid.UUID | None) -> list[dict[str, Any]]:
+    """One row per invoice line: the invoice's figures, its PO line, what was received,
+    how the match was made, and the checks the line breaks (the case page's signature)."""
+    if run_id is None:
+        return []
+    data = conn.execute(select(Extraction.data).where(Extraction.run_id == run_id)).scalar()
+    lines = (data or {}).get("lines") or []
+    matches = {
+        m.invoice_line_no: m
+        for m in conn.execute(select(LineMatch.__table__).where(LineMatch.run_id == run_id))
+    }
+    po_ids = {m.po_line_id for m in matches.values() if m.po_line_id}
+    po_lines = {
+        row.id: row for row in conn.execute(select(PoLine.__table__).where(PoLine.id.in_(po_ids)))
+    }
+    received = dict(
+        conn.execute(
+            select(ReceiptLine.po_line_id, func.sum(ReceiptLine.quantity_received))
+            .where(ReceiptLine.po_line_id.in_(po_ids))
+            .group_by(ReceiptLine.po_line_id)
+        ).all()
+    )
+    breaks: dict[str, list[dict[str, str]]] = {}
+    for row in conn.execute(
+        select(CheckResult.subject_key, CheckResult.check_code, CheckResult.status).where(
+            CheckResult.run_id == run_id,
+            CheckResult.status != "pass",
+            CheckResult.subject_key.like("line:%"),
+        )
+    ):
+        breaks.setdefault(row.subject_key, []).append(
+            {"check_code": str(row.check_code), "status": str(row.status)}
+        )
+    strip = []
+    for position, line in enumerate(lines, start=1):
+        index = int(line.get("index", position))
+        match = matches.get(index)
+        po = po_lines.get(match.po_line_id) if match and match.po_line_id else None
+        strip.append(
+            {
+                "line": index,
+                "description": line.get("description"),
+                "sku": line.get("sku"),
+                "quantity": line.get("quantity"),
+                "unit_price": line.get("unit_price"),
+                "line_total": line.get("line_total"),
+                "po": {
+                    "line_no": po.line_no,
+                    "description": po.description,
+                    "quantity": po.quantity,
+                    "unit_price": po.unit_price,
+                }
+                if po
+                else None,
+                "received": received.get(po.id) if po else None,
+                "method": match.method if match else None,
+                "similarity": match.similarity if match else None,
+                "breaks": breaks.get(f"line:{index}", []),
+            }
+        )
+    return strip
+
+
 def case_detail(conn: Connection, actor: Actor, case_id: uuid.UUID) -> dict[str, Any]:
     """`CaseDetail` (`06-api.md` §4), as this caller sees it."""
     require_reader(actor)
@@ -606,13 +858,17 @@ def case_detail(conn: Connection, actor: Actor, case_id: uuid.UUID) -> dict[str,
     vendor_id = _vendor_ids(conn, [case["evidence_run_id"]]).get(case["evidence_run_id"])
     vendor = (
         conn.execute(
-            select(Vendor.id, Vendor.vendor_code, Vendor.name, Vendor.is_approved).where(
-                Vendor.id == vendor_id
-            )
+            select(
+                Vendor.id, Vendor.vendor_code, Vendor.name, Vendor.is_approved, Vendor.address
+            ).where(Vendor.id == vendor_id)
         ).first()
         if vendor_id
         else None
     )
+    vendor_address = vendor.address if vendor else None  # the master's contact, never the invoice's
+    outcome = _outcomes(conn, [case_id]).get(case_id) if case["status"] == S.CLOSED else None
+    if outcome is not None:
+        outcome["approved_by"] = _users(conn, [outcome["approved_by"]]).get(outcome["approved_by"])
     supporting = conn.execute(
         select(SupportingDocument.__table__, Document.mime_type)
         .join(Document, Document.id == SupportingDocument.document_id)
@@ -671,6 +927,7 @@ def case_detail(conn: Connection, actor: Actor, case_id: uuid.UUID) -> dict[str,
         if runs
         else None,
         "findings": _findings(conn, state) if state else [],
+        "match_strip": _match_strip(conn, case["evidence_run_id"]),
         "supporting_documents": [
             {
                 "id": s.id,
@@ -719,6 +976,9 @@ def case_detail(conn: Connection, actor: Actor, case_id: uuid.UUID) -> dict[str,
             }
             for d in decisions
         ],
+        "outcome": outcome,
+        "bank_channels": list(state.policy.bank_verification.channels) if state else [],
+        "vendor_address": vendor_address,
         **_caller_options(conn, actor, case, state),
     }
     masked: dict[str, Any] = mask_bank(conn, detail)
@@ -758,12 +1018,14 @@ def case_audit(
         for e in rows
         if e.event_type == "run.completed"
     }
+    people = _users(conn, [e.actor_id for e in rows])
     items = [
         {
             "seq": e.seq,
             "occurred_at": e.occurred_at,
             "event_type": e.event_type,
             "actor_id": e.actor_id,
+            "actor_name": (people.get(e.actor_id) or {}).get("display_name"),
             "payload": e.payload,
             "hash": bytes(e.hash).hex(),
             "prev_hash": bytes(e.prev_hash).hex(),
@@ -778,6 +1040,7 @@ def case_audit(
     }
 
 
+VERIFICATION_DUE = dt.timedelta(hours=36)  # daily, with slack for a late cleanup run
 VERIFICATION_STATEMENT = (
     "The records were consistent when checked. Verification is tamper-evident, not"
     " tamper-proof: it doesn't prove that tampering is impossible, and events after"
@@ -827,6 +1090,8 @@ def _verification(conn: Connection, case_id: uuid.UUID) -> dict[str, Any] | None
             "overall_ok": latest.ok,
             "verified_through_seq": through,
             "covers_all_case_events": bool(seqs) and max(seqs) <= through,
+            # The daily check should have run since: an old result is shown as overdue.
+            "overdue": latest.finished_at < dt.datetime.now(dt.UTC) - VERIFICATION_DUE,
             "case_failures": mine,
             "statement": VERIFICATION_STATEMENT,
         },

@@ -84,3 +84,20 @@ def test_results_are_recorded_append_only_and_reported_per_case(
     _refused(conn, "DELETE FROM audit_verifications")
     conn.execute(text("SET LOCAL ROLE opspilot_app"))
     _refused(conn, "UPDATE audit_verifications SET ok = true")
+
+
+def test_an_old_verification_is_shown_as_overdue(conn: Connection, tmp_path: Path) -> None:
+    web = make_web(conn, tmp_path)
+    case_id = web.world.case([cs.approval()])
+    client = web.client(web.world.analyst)
+    now = dt.datetime.now(dt.UTC)
+    report = VerifyReport()
+    two_days_ago = now - dt.timedelta(days=2)
+    record(conn, report, started_at=two_days_ago, finished_at=two_days_ago, verified_as="x")
+    old = client.get(f"/api/v1/cases/{case_id}/audit").json()["verification"]
+    assert old["overdue"] is True
+    page = client.get(f"/cases/{case_id}")
+    assert "The daily check is overdue" in page.text
+    record(conn, report, started_at=now, finished_at=now, verified_as="x")
+    fresh = client.get(f"/api/v1/cases/{case_id}/audit").json()["verification"]
+    assert fresh["overdue"] is False

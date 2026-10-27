@@ -46,5 +46,7 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy
+      - name: Chromium for the browser journeys (Playwright, free download)
+        run: uv run playwright install --with-deps chromium
       - run: uv run alembic upgrade head
       - run: uv run pytest

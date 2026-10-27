@@ -21,6 +21,7 @@ from opspilot.web.auth import CSRF_FIELD, is_form, read_form
 
 Text = Annotated[str, Field(max_length=5000)]
 Version = Annotated[int, Field(ge=1)]
+ShortText = Annotated[str, Field(max_length=200)]
 
 
 class Body(BaseModel):
@@ -107,7 +108,8 @@ class RecordResolution(Body):
     resolution_type: ResolutionType
     summary: Text
     evidence: list[EvidenceRef] = []
-    structured: dict[str, Annotated[str, Field(max_length=200)]] = {}
+    # Text, or a short list of texts (`both_invoice_numbers` names two invoices).
+    structured: dict[str, ShortText | Annotated[list[ShortText], Field(max_length=5)]] = {}
     expected_version: Version
 
     @classmethod
@@ -115,11 +117,12 @@ class RecordResolution(Body):
         data = {k: v for k, v in super().from_form(form).items() if not k.startswith("structured.")}
         data.pop("evidence", None)
         data["evidence"] = [_evidence_from_form(str(v)) for v in form.getlist("evidence") if v]
-        data["structured"] = {
-            k.removeprefix("structured."): v
-            for k, v in form.multi_items()
-            if k.startswith("structured.") and isinstance(v, str) and v
-        }
+        structured: dict[str, list[str]] = {}
+        for k, v in form.multi_items():
+            if k.startswith("structured.") and isinstance(v, str) and v:
+                structured.setdefault(k.removeprefix("structured."), []).append(v)
+        # A field sent once is a value; a field sent several times is a list.
+        data["structured"] = {k: v[0] if len(v) == 1 else v for k, v in structured.items()}
         return data
 
 

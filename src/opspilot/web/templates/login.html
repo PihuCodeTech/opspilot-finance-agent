@@ -1,13 +1,38 @@
 {% extends "base.html" %}
+{% from "_ui.html" import mark, prefs %}
 {% block title %}Sign in · OpsPilot{% endblock %}
-{% block main %}
-  <h1>Sign in to OpsPilot</h1>
-  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-  <form method="post" action="/auth/login">
-    <p><label for="username">Username</label><br>
-      <input id="username" name="username" autocomplete="username" required></p>
-    <p><label for="password">Password</label><br>
-      <input id="password" name="password" type="password" autocomplete="current-password" required></p>
-    <button type="submit">Sign in</button>
-  </form>
+{% block bare %}
+<div class="signin">
+  <div class="panel">
+    <p class="brand">{{ mark() }}OpsPilot</p>
+    <h1>Sign in to OpsPilot</h1>
+    <p>Investigates invoice exceptions with cited evidence; nothing is paid without an approver.</p>
+    {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+    <form method="post" action="/auth/login">
+      <div class="form-field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" required></div>
+      <div class="form-field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <div class="form-actions"><button type="submit" class="button primary">Sign in</button></div>
+    </form>
+    {% if demo_users %}
+    <section aria-labelledby="demo-title">
+      <h2 id="demo-title">Demo accounts</h2>
+      <p class="subline">Synthetic people; the password was set when the demo was seeded.</p>
+      <table class="demo-users"><caption class="visually-hidden">Demo accounts and their roles</caption><tbody>
+        {% for u in demo_users %}<tr><td class="mono">{{ u.username }}</td><td>{{ u.display_name }}</td><td>{% if u.role == "approver" %}{{ "Controller, no limit" if u.approval_unlimited else "Approver up to " ~ (u.approval_limit | money) }}{% else %}{{ u.role | capitalize }}{% endif %}</td></tr>{% endfor %}
+      </tbody></table>
+    </section>
+    {% endif %}
+  </div>
+  <div class="art" aria-hidden="true">
+    {# The match stack, drawn flat: PO, receipt and invoice as three sheets, one line breaking. #}
+    <svg viewBox="0 0 520 360" role="presentation">
+      <g fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.35"><path d="M60 250 L300 190 L460 230 L220 290 Z"/><path d="M60 190 L300 130 L460 170 L220 230 Z"/></g>
+      <g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M60 130 L300 70 L460 110 L220 170 Z"/></g>
+      <g stroke="currentColor" stroke-width="1" opacity="0.5"><path d="M140 140 V260 M200 125 V245 M260 110 V230"/></g>
+      <path d="M320 98 V218" class="art-break" stroke-width="2" stroke-dasharray="4 4"/>
+      <text x="470" y="115" class="art-label">Invoice</text><text x="470" y="175" class="art-label">Receipt</text><text x="470" y="235" class="art-label">PO</text>
+    </svg>
+  </div>
+  {{ prefs(theme, views_3d, "/login") }}
+</div>
 {% endblock %}
