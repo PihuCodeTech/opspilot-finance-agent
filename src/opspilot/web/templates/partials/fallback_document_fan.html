@@ -1,0 +1,13 @@
+{# Document fan, flat: a thumbnail strip; the page in the viewer sits forward. #}
+{% set g = s.svg %}
+<svg viewBox="0 0 {{ g.w }} {{ g.h }}" class="sv" role="group" aria-label="{{ s.label }}">
+  {% for gr in g.groups %}
+  {% for sh in gr.sheets | sort(attribute="forward") %}
+  <a href="{{ sh.href or '#' ~ sh.target }}" aria-label="{{ sh.label }}{% if sh.forward %}, in the viewer{% endif %}">
+    <rect class="sv-sheet{{ ' forward' if sh.forward }}" x="{{ sh.x }}" y="{{ sh.y }}" width="{{ g.sw }}" height="{{ g.sh }}" rx="2"/>
+    {% if sh.n %}<text class="sv-small" x="{{ sh.x + g.sw / 2 }}" y="{{ sh.y + g.sh / 2 + 4 }}" text-anchor="middle">{{ sh.n }}</text>{% endif %}
+  </a>
+  {% endfor %}
+  <text class="sv-label" x="{{ gr.lx }}" y="96">{{ gr.label }}{% if gr.more %} +{{ gr.more }}{% endif %}</text>
+  {% endfor %}
+</svg>
