@@ -334,12 +334,6 @@ blockquote.well { margin: 0; }
 .scene-selected, .scene-marked { background: var(--active); border-radius: var(--radius-chip); }
 tr.scene-selected td, tr.scene-selected th, tr.scene-marked td, tr.scene-marked th { background: var(--active); }
 
-/* Table / 3D switch in the evidence header */
-.segmented { display: inline-flex; border: 1px solid var(--control); border-radius: var(--radius-control); overflow: hidden; }
-.segmented a { padding: 4px 12px; font-size: var(--fs-small); color: var(--muted); text-decoration: none; min-height: 28px; display: inline-flex; align-items: center; }
-.segmented a + a { border-left: 1px solid var(--control); }
-.segmented a[aria-current="true"] { background: var(--active); color: var(--text); font-weight: 500; }
-
 /* desk overview: 160px, full width; the fallback is a bar per pile on the same scale */
 .scene-desk .scene-fallback { height: 160px; overflow: visible; }
 .desk-bars { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; height: 100%; }
