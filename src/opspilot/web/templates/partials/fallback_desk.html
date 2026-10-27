@@ -1,0 +1,12 @@
+{# Desk overview, flat: a bar per pile on the 3D view's scale; each bar filters the table. #}
+<ol class="desk-bars" role="list" aria-label="{{ s.label }}">
+  {% for p in s.svg.piles %}
+  <li class="{{ 'ink' if p.ink }}">
+    {% if p.href %}<a href="{{ p.href }}"{% if p.current %} aria-current="true"{% endif %}>{% else %}<span class="row">{% endif %}
+      <span class="name">{{ p.label }}</span>
+      <svg class="bar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ p.width }}" height="8"/></svg>
+      <span class="count">{{ p.count }}</span>
+    {% if p.href %}</a>{% else %}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
