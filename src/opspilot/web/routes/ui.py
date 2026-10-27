@@ -310,7 +310,8 @@ def case_page(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Respon
     params = request.query_params
     page_no = int(params["page"]) if params.get("page", "").isdigit() else 1
     run = case["evidence_run"]
-    evidence_view = params.get("evidence") or ("3d" if views_3d_enabled(request) else "table")
+    # The table is the default and authoritative view; 3D is an optional view beside it.
+    show_3d = params.get("evidence") == "3d"
     scenes = {
         "match_stack": match_stack(
             case["match_strip"], run["checks"] if run else [], case["findings"]
@@ -329,10 +330,7 @@ def case_page(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Respon
             previews=bool(case["invoice"]["redaction_supported"] and run),
         ),
     }
-    views = {
-        view: "?" + urlencode({**params, "evidence": view}) + "#evidence"
-        for view in ("table", "3d")
-    }
+    toggle = "?" + urlencode({**params, "evidence": "table" if show_3d else "3d"}) + "#evidence"
     return app_page(
         request,
         "case.html",
@@ -343,8 +341,8 @@ def case_page(request: Request, case_id: uuid.UUID, user: CurrentUser) -> Respon
         progress=progress,
         supporting_kinds=list(SupportingKind),
         scenes=scenes,
-        evidence_view="table" if evidence_view == "table" else "3d",
-        evidence_views=views,
+        show_3d=show_3d,
+        evidence_toggle=toggle,
     )
 
 
