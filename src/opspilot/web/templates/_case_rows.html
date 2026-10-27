@@ -1,0 +1,49 @@
+{# The queue table, shared by Cases and Approvals. `mode` is "cases" or "approvals". #}
+{% from "_ui.html" import pill %}
+<div class="table-frame">
+<table class="data responsive" data-queue>
+  <caption class="visually-hidden">{{ caption }}</caption>
+  <thead>
+    <tr>
+      <th scope="col">Invoice</th>
+      <th scope="col">Status</th>
+      <th scope="col">Findings</th>
+      <th scope="col">Proposal</th>
+      {% if mode == "approvals" %}<th scope="col">Tier</th><th scope="col">Submitted by</th>{% endif %}
+      <th scope="col" class="num">Amount</th>
+      <th scope="col" class="num">Updated</th>
+      <th scope="col" class="action-col"><span class="visually-hidden">Next step</span></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for c in cases.items %}
+    {% set next_step = ("Review" if c.status == "needs_review" else "Retry" if c.status == "investigation_failed" else None) if user.role == "analyst" else ("Review" if mode == "approvals" and not held else None) %}
+    <tr data-href="/cases/{{ c.id }}" tabindex="-1">
+      <td class="id-cell">
+        <a href="/cases/{{ c.id }}">{{ c.invoice_number or "Not read yet" }}</a>
+        <span class="sub">{{ c.vendor.name if c.vendor else (c.vendor_name_read or "Vendor not identified") }}</span>
+      </td>
+      <td data-label="Status">{{ pill(c.status, c.outcome) }}</td>
+      <td data-label="Findings">{% if c.finding_types %}{{ c.finding_types | finding_list }}{% elif c.status in ("new", "investigating", "investigation_failed") %}<span class="dash">—</span>{% else %}None{% endif %}</td>
+      <td data-label="Proposal">{{ ACTION.get(c.proposed_action, "—") if c.proposed_action else "—" }}</td>
+      {% if mode == "approvals" %}
+      <td data-label="Tier">{{ (c.required_approver_tier or "—") | capitalize }}</td>
+      <td data-label="Submitted by">{{ c.submitted_by.display_name if c.submitted_by else "—" }}</td>
+      {% endif %}
+      <td class="num" data-label="Amount">{{ (c.required_approval_amount if c.required_approval_amount is not none else c.total) | money }}</td>
+      <td class="num" data-label="Updated"><time datetime="{{ c.updated_at.isoformat() }}" title="{{ c.updated_at | iso }}">{{ c.updated_at | relative }}</time></td>
+      <td class="action-col">{% if next_step %}<a class="button ghost" href="/cases/{{ c.id }}">{{ next_step }}<span class="visually-hidden"> invoice {{ c.invoice_number or "" }}</span></a>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr class="empty-row"><td colspan="{{ 9 if mode == 'approvals' else 7 }}">{{ empty }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="pager">
+  <span>{% if cases.total is not none %}{{ cases.items | length }} shown of {{ cases.total }}{% endif %}</span>
+  <span>
+    {% if not first_page %}<a href="?{{ filter_query }}">First page</a>{% endif %}
+    {% if cases.next_cursor %}<a href="?{{ filter_query }}{{ '&' if filter_query else '' }}cursor={{ cases.next_cursor }}">Next page</a>{% endif %}
+  </span>
+</div>

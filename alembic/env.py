@@ -4,9 +4,9 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from opspilot.config import get_settings
+from opspilot.db.models import Base, include_name
 
-# Models are attached in P2; until then there is nothing to autogenerate against.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def _owner_url() -> str:
@@ -18,7 +18,12 @@ def _owner_url() -> str:
 def run_migrations_online() -> None:
     engine = create_engine(_owner_url(), poolclass=pool.NullPool)
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_server_default=True,
+            include_name=include_name,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

@@ -1,0 +1,11 @@
+{# Investigation progress: polled every 2 s; announced politely on step change only. #}
+<div hx-get="/cases/{{ case_id if case_id is defined else case.id }}/_progress" hx-trigger="every 2s" hx-swap="outerHTML" data-progress>
+  {% if progress.quota_resumes_at %}
+  <p class="notice" role="status">Waiting for AI quota · resumes after {{ progress.quota_resumes_at | iso }} (in {{ progress.quota_resumes_at | until }})</p>
+  {% endif %}
+  <ol class="progress" aria-label="Investigation progress">
+    {% for s in progress.steps %}<li class="{{ 'done' if s.done else 'current' if s.current else '' }}"{% if s.current %} aria-current="step"{% endif %}>{{ s.label }}</li>{% endfor %}
+  </ol>
+  {% set current = progress.steps | selectattr("current") | first %}
+  <p class="visually-hidden" aria-live="polite">{{ current.label if current else "Finishing" }}</p>
+</div>

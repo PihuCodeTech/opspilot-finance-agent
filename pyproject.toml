@@ -6,14 +6,29 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
+    "argon2-cffi>=25.1.0",
+    "docling==2.137.0",
+    "faker>=40.43.0",
     "fastapi>=0.162.0",
+    "google-genai==2.29.0",
     "jinja2>=3.1.6",
+    "langgraph==1.2.14",
+    "langgraph-checkpoint==4.2.0",
+    "langgraph-checkpoint-postgres==3.1.2",
+    "pgvector>=0.5.1",
+    "pillow==12.3.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.1",
+    "pypdfium2==5.14.0",
+    "python-multipart==0.0.32",
+    "sentence-transformers==6.1.0",
     "sqlalchemy>=2.1.6",
     "structlog>=26.1.0",
+    "torch==2.14.1",
+    "torchvision==0.29.1",
     "uvicorn>=0.54.0",
+    "weasyprint>=70.0",
 ]
 
 [project.scripts]
@@ -25,6 +40,29 @@ build-backend = "uv_build"
 
 [tool.uv]
 python-preference = "managed"
+# Transitive packages of LangGraph held to releases at least two weeks old (P10),
+# like every direct dependency; raise deliberately, not through a routine lock.
+constraint-dependencies = [
+    "langchain-core<=1.6.9",
+    "langchain-protocol<=0.0.19",
+    "langgraph-prebuilt<=1.1.0",
+    "langgraph-sdk<=0.4.6",
+    "langsmith<=0.14.7",
+    "ormsgpack<=1.12.2",
+    "uuid-utils<=0.17.1",
+    "xxhash<=4.0.1",
+]
+
+# CPU-only PyTorch on Linux (Docker, CI): the default Linux wheels bundle CUDA and are
+# several GB. macOS wheels are CPU-only already.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.ruff]
 line-length = 100
@@ -34,15 +72,26 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PL", "N", "ASYNC", "BLE", "T20"]
 ignore = ["PLR0913"]
+# Typographic characters used on purpose in UI and policy text (07-design.md §5).
+allowed-confusables = ["−", "×", "–", "±", "•"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "PLR2004"]
+# Migrations build DDL from module constants (no external input) and carry long SQL.
+"alembic/versions/**" = ["S608", "E501", "PLR0915"]
+# The generator draws scenario choices with explicit probabilities (documented in docs/datasets.md).
+"src/opspilot/evaluation/generator/build.py" = ["PLR2004", "S311"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tests"]
+
+# pypdfium2 ships no type hints; it is used in two small modules (web/uploads, web/pages).
+[[tool.mypy.overrides]]
+module = ["pypdfium2", "pypdfium2.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
@@ -54,12 +103,17 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
   "integration: needs a real PostgreSQL (TEST_DATABASE_URL); skipped when it isn't set",
+  "docling: runs Docling on real PDFs (downloads its models on first use; a few seconds each)",
+  "models: loads the local embedding model (downloads it on first use)",
+  "e2e: browser journeys with Playwright against a live server (needs TEST_DATABASE_URL and Chrome or Playwright's Chromium)",
 ]
 
 [dependency-groups]
 dev = [
     "httpx2>=2.16.0",
+    "hypothesis>=6.170.9",
     "mypy>=2.4.0",
+    "playwright==1.63.0",
     "pytest>=9.1.1",
     "ruff>=0.17.2",
 ]

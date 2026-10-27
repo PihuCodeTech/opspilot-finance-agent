@@ -1,0 +1,134 @@
+# OpsPilot procurement policy configuration.
+#
+# The single source of truth for tolerances, approval limits, the agent and
+# analyst action allowlists and the finding-resolution rules (04-prd.md §3, D8).
+# TruthLens checks, the case service and the generated policy document all read
+# this file, so they can't disagree. Decimals are written as strings on purpose:
+# TOML floats are binary and are rejected by the loader.
+
+version = "2026.10-3"
+currency = "USD"
+rounding = "half_up"
+
+[tolerances]
+unit_price_overcharge_pct = "2.00"      # overcharge ≤ 2.00% accepted; 2.01% is an exception
+unit_price_undercharge_info_pct = "2.00" # undercharge beyond this is recorded as information
+line_arithmetic_abs = "0.01"            # line total = qty × price, within ±0.01
+invoice_total_abs = "0.05"              # sum of lines (+ tax) within ±0.05
+tax_abs = "0.01"                        # stated tax within ±0.01 of computed tax
+near_duplicate_total_pct = "0.50"       # same vendor, total within ±0.5% …
+near_duplicate_window_days = 30         # … invoice dates within 30 days, same line set
+
+[extraction]
+# A check whose input field was read with lower confidence than this is `inconclusive`:
+# it never passes and never raises an exception (04-prd.md §3). Missing confidence counts as 0.
+min_field_confidence = "0.90"
+
+[approval_levels]                       # PO approval levels
+level_1_max = "10000.00"
+level_2_max = "50000.00"
+level_3_requires_controller_approval = true   # level 3 is anything above level_2_max
+
+[approver_limits]
+standard = "10000.00"                   # standard approvers; controllers are unlimited
+
+[bank_verification]
+contact_source = "vendor_master"        # contact details must come from the vendor master
+channels = [
+  "callback_to_master_contact",
+  "signed_letter_to_master_address",
+  "vendor_portal_change_request",
+]
+
+# Action allowlists. Categories: clean, inconclusive, restricted, other, all_resolved.
+# The loader refuses any list that would let payment through an unresolved,
+# restricted or inconclusive finding, or that lacks place_on_hold where findings exist.
+[allowlists.agent]
+clean = ["approve_for_payment"]
+inconclusive = ["place_on_hold", "draft_vendor_query"]
+restricted = ["place_on_hold", "draft_vendor_query"]
+other = ["place_on_hold", "draft_vendor_query", "reject_invoice"]
+
+[allowlists.analyst]
+clean = ["approve_for_payment", "place_on_hold", "draft_vendor_query"]
+inconclusive = ["place_on_hold", "draft_vendor_query", "reject_invoice"]
+restricted = ["place_on_hold", "draft_vendor_query", "reject_invoice"]
+other = ["place_on_hold", "draft_vendor_query", "reject_invoice"]
+all_resolved = ["approve_for_payment", "place_on_hold", "draft_vendor_query", "reject_invoice"]
+
+# Findings cleared only by a successful recheck, never by a recorded resolution.
+[resolutions]
+recheck_only = ["MISSING_OR_UNKNOWN_PO", "EXTRACTION_UNCERTAIN"]
+no_resolution_needed = ["FORENSICS_SIGNAL"]
+
+# Resolution rules: every listed evidence item is required; the summary is required too
+# but never sufficient on its own. `check` names the server-side numeric check (P9).
+[[resolutions.rules]]
+finding = "PRICE_MISMATCH"
+type = "price_agreed"
+evidence = ["po_amendment"]
+structured = ["amended_unit_price"]
+check = "invoice_price_within_amended_price"
+
+[[resolutions.rules]]
+finding = "PRICE_MISMATCH"
+type = "credit_issued"
+evidence = ["credit_note"]
+structured = ["credit_amount"]
+check = "credit_covers_overcharge"
+
+[[resolutions.rules]]
+finding = "QTY_OVER_RECEIVED"
+type = "additional_receipt"
+evidence = ["goods_receipt"]
+structured = ["received_quantity"]
+check = "cumulative_received_covers_billed"
+
+[[resolutions.rules]]
+finding = "QTY_OVER_RECEIVED"
+type = "credit_issued"
+evidence = ["credit_note"]
+structured = ["credit_amount"]
+check = "credit_covers_excess_quantity"
+
+[[resolutions.rules]]
+finding = "ARITHMETIC_MISMATCH"
+type = "credit_issued"
+evidence = ["credit_note"]
+structured = ["credit_amount"]
+check = "credit_covers_overstatement"
+
+[[resolutions.rules]]
+finding = "TAX_MISCALCULATED"
+type = "credit_issued"
+evidence = ["credit_note"]
+structured = ["credit_amount"]
+check = "credit_covers_overstatement"
+
+[[resolutions.rules]]
+finding = "VENDOR_NOT_APPROVED"
+type = "vendor_approved"
+evidence = ["vendor_approval"]
+structured = ["vendor_code"]
+check = "approval_names_vendor"
+
+[[resolutions.rules]]
+finding = "APPROVAL_LIMIT_EXCEEDED"
+type = "po_approval_obtained"
+evidence = ["po_approval"]
+structured = ["approval_level"]
+check = "approval_at_required_level"
+
+[[resolutions.rules]]
+finding = "DUPLICATE_INVOICE"
+type = "not_duplicate"
+evidence = ["vendor_confirmation", "ledger_invoice_reference"]
+structured = ["both_invoice_numbers", "distinguishing_fact"]
+check = "confirmation_names_both_invoices"
+
+[[resolutions.rules]]
+finding = "BANK_DETAILS_CHANGED"
+type = "bank_verified"
+evidence = ["bank_verification_record", "bank_verification"]
+structured = []
+check = "verified_fingerprint_matches_invoice"

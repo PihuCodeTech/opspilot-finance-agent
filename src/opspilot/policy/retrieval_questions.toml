@@ -1,0 +1,104 @@
+# Retrieval evaluation set (D5): questions -> the policy sections that answer them.
+# Mix of exact-token and paraphrased questions; `expected = []` must return nothing.
+# Written against policy version 2026.10-3 (section IDs are stable across versions).
+
+[[question]]
+q = "What does this policy cover?"
+expected = ["1"]
+[[question]]
+q = "What currency are invoices in?"
+expected = ["2.1"]
+[[question]]
+q = "How are amounts rounded before they are compared?"
+expected = ["2.2"]
+[[question]]
+q = "Is a variance exactly at the tolerance accepted?"
+expected = ["2.2"]
+[[question]]
+q = "How much above the purchase order price may a unit price be?"
+expected = ["3.1"]
+[[question]]
+q = "unit price tolerance 2.00%"
+expected = ["3.1"]
+[[question]]
+q = "What happens if the supplier charges less than the PO?"
+expected = ["3.1"]
+[[question]]
+q = "Can we be billed for more goods than were delivered?"
+expected = ["3.2"]
+[[question]]
+q = "quantity received over-billing"
+expected = ["3.2"]
+[[question]]
+q = "line total must equal quantity times unit price"
+expected = ["3.3"]
+[[question]]
+q = "How much difference is allowed between the lines and the invoice total?"
+expected = ["3.3"]
+[[question]]
+q = "Is the sales tax amount checked?"
+expected = ["3.4"]
+[[question]]
+q = "tax computed at the vendor's registered rate"
+expected = ["3.4"]
+[[question]]
+q = "What counts as a duplicate invoice?"
+expected = ["4.1", "4.2"]
+[[question]]
+q = "same invoice number from the same vendor"
+expected = ["4.1"]
+[[question]]
+q = "resubmitted invoice with a new number but the same lines within 30 days"
+expected = ["4.2"]
+[[question]]
+q = "What are the purchase order approval levels?"
+expected = ["5"]
+[[question]]
+q = "Level 3 controller approval on the purchase order"
+expected = ["5"]
+[[question]]
+q = "Who can approve an invoice over $10,000?"
+expected = ["6"]
+[[question]]
+q = "When is a case escalated to a controller?"
+expected = ["6"]
+[[question]]
+q = "Can someone approve a case they submitted themselves?"
+expected = ["6"]
+[[question]]
+q = "The supplier says their bank account has changed"
+expected = ["7"]
+[[question]]
+q = "callback to master contact"
+expected = ["7"]
+[[question]]
+q = "What can the investigation agent propose for a duplicate invoice?"
+expected = ["8.1"]
+[[question]]
+q = "Which actions can an analyst choose once every finding is resolved?"
+expected = ["8.2"]
+[[question]]
+q = "How do I clear a price mismatch with a credit note?"
+expected = ["9"]
+[[question]]
+q = "Can a written explanation alone resolve a finding?"
+expected = ["9"]
+[[question]]
+q = "missing purchase order needs a recheck"
+expected = ["9"]
+[[question]]
+q = "Is this vendor on the approved list?"
+expected = ["10"]
+[[question]]
+q = "invoice from a supplier that is not approved"
+expected = ["10"]
+
+[[question]]
+q = "What is the parking policy for visitors?"
+expected = []
+[[question]]
+q = "How many vacation days do employees get?"
+expected = []
+[[question]]
+q = "What is the office wifi password?"
+expected = []

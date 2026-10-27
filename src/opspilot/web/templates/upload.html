@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Upload invoice · OpsPilot{% endblock %}
+{% block main %}
+<div class="title-row"><div><h1>Upload invoice</h1><p class="subline">OpsPilot reads it, checks it against the demo ledger and proposes an action for review.</p></div></div>
+<section class="card stack" aria-labelledby="upload-title">
+  <h2 id="upload-title" class="visually-hidden">File</h2>
+  <p class="notice" role="note">Upload synthetic or demo documents only. Text is processed by a third-party AI service on a free tier, which may use it to improve its products.</p>
+  <p class="notice quiet" role="note">Scanned images (PNG, JPEG) can't have bank details redacted until OCR arrives: they get no preview and are never sent to the AI. Prefer a PDF with a text layer.</p>
+  <form method="post" action="/uploads" enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="form-field">
+      <label for="file">Invoice file</label>
+      <input id="file" name="file" type="file" accept="application/pdf,image/png,image/jpeg" required aria-describedby="file-help{% if error_code %} file-error{% endif %}">
+      <span class="help" id="file-help">PDF, PNG or JPEG · up to {{ max_mb }} MB · up to 20 pages. The type is checked from the file's content.</span>
+      {% if error_code %}<span class="error" id="file-error" role="alert">× {{ ERROR_WORDS[error_code] }}</span>{% endif %}
+    </div>
+    <div class="form-actions"><button type="submit" class="button primary">Upload and investigate</button></div>
+  </form>
+</section>
+{% endblock %}

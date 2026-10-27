@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ "Held" if held else "Approvals" }} · OpsPilot{% endblock %}
+{% block main %}
+<div class="title-row">
+  <div>
+    {% if held %}
+    <h1>Held</h1>
+    <p class="subline">No approver with authority is active for these cases. They move back to approval once one is.</p>
+    {% else %}
+    <h1>Approvals</h1>
+    <p class="subline">{{ nav_counts.mine }} waiting within your {{ "authority" if user.actor.approval_unlimited else "limit" }}{% if nav_counts.oldest_submitted_at %}<span class="sep">·</span>oldest waiting {{ nav_counts.oldest_submitted_at | relative }}{% endif %}</p>
+    {% if nav_counts.others %}<p class="subline">{{ nav_counts.others }} more {{ "need" if nav_counts.others != 1 else "needs" }} {{ "another approver" if user.actor.approval_unlimited else "a controller" }}.</p>{% endif %}
+    {% endif %}
+  </div>
+</div>
+{% set mode = "approvals" %}
+{% set filter_query = "status=held_for_approver" if held else "" %}
+{% set first_page = not request.query_params.get("cursor") %}
+{% set caption = "Held cases" if held else "Cases waiting for your approval, oldest first" %}
+{% set empty = "Nothing is held." if held else "Nothing is waiting for your approval." %}
+{% include "_case_rows.html" %}
+{% endblock %}

@@ -1,18 +1,56 @@
+{% from "_ui.html" import icon, mark, nav, prefs with context %}
 <!doctype html>
 <html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %} data-views3d="{{ 'on' if views_3d else 'off' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {# htmx would inject an inline <style> for its indicators, which the CSP blocks (style-src 'self'). #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
+  <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
   <title>{% block title %}OpsPilot{% endblock %}</title>
   <link rel="preload" href="{{ url_for('static', path='fonts/geist/Geist-Regular.woff2') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
   <script src="{{ url_for('static', path='vendor/htmx/htmx.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='js/app.js') }}" defer></script>
 </head>
-<body>
+<body{% if user %} data-idle-seconds="{{ idle_seconds }}"{% endif %}>
   <a class="skip-link" href="#main">Skip to main content</a>
-  <main id="main" class="canvas">
-    {% block main %}{% endblock %}
-  </main>
+  {% if user %}
+  {% set here = request.url.path ~ ("?" ~ request.url.query if request.url.query else "") %}
+  <div class="app">
+    <aside class="sidebar" aria-label="OpsPilot">
+      <a class="brand" href="/">{{ mark() }}OpsPilot</a>
+      <p class="scope"><span class="visually-hidden">Scope: </span><span class="meta">Demo ledger</span></p>
+      {{ nav(user, path, nav_counts) }}
+      <div class="sidebar-foot">
+        <p class="who"><span>{{ user.display_name }}</span><span class="meta">{% if user.role == "approver" %}Approver · {% if user.actor.approval_unlimited %}controller, no limit{% else %}up to {{ user.actor.approval_limit | money }}{% endif %}{% else %}{{ user.role | capitalize }}{% endif %}</span></p>
+        <div class="tools">
+          {{ prefs(theme, views_3d, here) }}
+          <form method="post" action="/auth/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="text-button">Sign out</button></form>
+        </div>
+      </div>
+    </aside>
+    <header class="topbar">
+      <a class="brand" href="/">{{ mark() }}OpsPilot</a>
+      <details>
+        <summary class="icon-button" aria-label="Menu">{{ icon("menu") }}</summary>
+        <div class="sheet">
+          {{ nav(user, path, nav_counts) }}
+          <p class="who"><span>{{ user.display_name }}</span><span class="meta">{{ user.role | capitalize }}</span></p>
+          {{ prefs(theme, views_3d, here) }}
+          <form method="post" action="/auth/logout"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="button secondary">Sign out</button></form>
+        </div>
+      </details>
+    </header>
+    <main id="main" class="canvas">
+      <p class="notice" role="status" data-idle-warning hidden>Your session ends in 2 minutes without activity. Reload the page to keep it.</p>
+      {% block main %}{% endblock %}
+    </main>
+  </div>
+  {% else %}
+  <main id="main">{% block bare %}{% endblock %}</main>
+  {% endif %}
 </body>
 </html>

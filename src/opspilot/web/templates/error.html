@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} · OpsPilot{% endblock %}
+{% block bare %}
+<div class="canvas">
+  <h1>{% if status == 404 %}Not found{% elif status == 403 %}Not allowed{% elif status == 409 %}That isn't possible now{% elif status == 429 %}Too many requests{% else %}Something went wrong{% endif %}</h1>
+  <p class="subline" role="alert">{{ message }}</p>
+  <p><a href="/">Back to cases</a></p>
+</div>
+{% endblock %}

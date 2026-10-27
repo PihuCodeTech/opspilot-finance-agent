@@ -33,6 +33,7 @@
   --pill-neutral-bg: #eeeeee;  --pill-neutral-ink: #3d3d3d;
 
   --focus: #0a0a0a;
+  --float-shadow: 0 4px 16px rgb(0 0 0 / 0.12);  /* menus and popovers only */
 
   --radius-card: 8px;  --radius-control: 6px;  --radius-chip: 4px;
   --gap: 12px;  --card-pad: 20px;  --pad: 24px;
@@ -60,6 +61,7 @@
   --warning: #e0a24a;   --pill-warning-bg: #2a2010;   --pill-warning-ink: #f0b45a;  --notice-border: #5a4415;
   --pill-neutral-bg: #26292c;  --pill-neutral-ink: #d4d4d4;
   --focus: #f2f2f2;
+  --float-shadow: 0 4px 16px rgb(0 0 0 / 0.5);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -75,5 +77,6 @@
     --warning: #e0a24a;   --pill-warning-bg: #2a2010;   --pill-warning-ink: #f0b45a;  --notice-border: #5a4415;
     --pill-neutral-bg: #26292c;  --pill-neutral-ink: #d4d4d4;
     --focus: #f2f2f2;
+  --float-shadow: 0 4px 16px rgb(0 0 0 / 0.5);
   }
 }

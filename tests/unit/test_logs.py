@@ -28,3 +28,9 @@ def test_iso_dates_are_not_masked() -> None:
     assert mask_digits("due 2026-10-24, paid 2026-10-24T17:51:58Z") == (
         "due 2026-10-24, paid 2026-10-24T17:51:58Z"
     )
+
+
+def test_uuids_are_not_masked() -> None:
+    run_id = "d43d6cdd-1234-4567-876c-158c2d0cc816"
+    assert mask_digits(f"run {run_id} failed") == f"run {run_id} failed"
+    assert mask_digits(f"{run_id} acct 12345678901234") == f"{run_id} acct ••••1234"
