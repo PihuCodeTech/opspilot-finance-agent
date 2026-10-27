@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/scene.html" import scene %}
 {% block title %}{{ "Held" if held else "Approvals" }} · OpsPilot{% endblock %}
 {% block main %}
 <div class="title-row">
@@ -13,6 +14,7 @@
     {% endif %}
   </div>
 </div>
+{% if desk %}{{ scene(desk) }}{% endif %}
 {% set mode = "approvals" %}
 {% set filter_query = "status=held_for_approver" if held else "" %}
 {% set first_page = not request.query_params.get("cursor") %}
