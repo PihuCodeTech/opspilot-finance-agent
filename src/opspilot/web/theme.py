@@ -23,3 +23,9 @@ def explicit_theme(request: Request) -> Theme | None:
 
 def views_3d_enabled(request: Request) -> bool:
     return request.cookies.get(VIEWS_3D_COOKIE) != "off"
+
+
+def views_3d_explicit(request: Request) -> bool:
+    """3D turned on by the user, not by default: under reduced motion this still allows
+    static 3D scenes (`07-design.md` §11.5)."""
+    return request.cookies.get(VIEWS_3D_COOKIE) == "on"
