@@ -28,7 +28,7 @@ export function build(kit, data) {
     hit.position.y = 0.4;
     group.add(hit);
     const label = kit.label(station.label, [x(station.p), i % 2 ? -0.55 : 0.95, 0], station.current ? "data" : "");
-    const when = station.at === null ? (data.live ? "" : ", no record of its own") : ` at ${station.at} s`;
+    const when = station.at === null ? (data.live ? "" : ", untimed") : `, recorded at +${station.at} s`;
     const state = station.current ? ", in progress" : station.done ? ", done" : "";
     return kit.item({
       object: group,
