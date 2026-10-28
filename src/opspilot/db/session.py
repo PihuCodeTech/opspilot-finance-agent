@@ -43,6 +43,15 @@ def get_scorer_engine() -> Engine:
 
 
 @lru_cache(maxsize=1)
+def get_baseline_engine() -> Engine:
+    """The baseline's SQL tool only: SELECT on the ERP views, 5 s statement timeout."""
+    url = get_settings().database_url_baseline_ro
+    if url is None:
+        raise RuntimeError("DATABASE_URL_BASELINE_RO is not set")
+    return create_engine(url.get_secret_value(), pool_pre_ping=True, pool_size=1, max_overflow=1)
+
+
+@lru_cache(maxsize=1)
 def get_verifier_engine() -> Engine:
     """Read-only role for `audit verify`: recomputes chains and digests, can change nothing."""
     url = get_settings().database_url_verifier
