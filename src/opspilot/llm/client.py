@@ -38,6 +38,8 @@ from opspilot.llm.types import LlmRequest, LlmResponse, Message
 log = structlog.get_logger()
 ModelT = TypeVar("ModelT", bound=BaseModel)
 BACKOFF_SECONDS = (1.0, 2.0, 4.0, 8.0)
+# Opens the message that sends an invalid structured reply back; the evaluation counts it.
+SCHEMA_FEEDBACK = "Your previous reply did not match the required JSON schema."
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,8 @@ class LlmClient:
     fixtures_dir: Path | None = None  # replay source / record target for tests
     max_attempts: int = 4
     sleep: Callable[[float], None] = time.sleep
+    # Sees every request and its result, replayed or live (the evaluation's call log).
+    observer: Callable[[LlmRequest, "LlmResult"], None] | None = None
     _replay_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # ------------------------------------------------------------- recordings
@@ -174,7 +178,10 @@ class LlmClient:
         guard_sensitive(request)
         request_sha = self.request_sha256(request)
         if self.mode is LlmMode.REPLAY:
-            return LlmResult(self._replay(request_sha), request_sha, 0, 0, 0, replayed=True)
+            replayed = LlmResult(self._replay(request_sha), request_sha, 0, 0, 0, replayed=True)
+            if self.observer:
+                self.observer(request, replayed)
+            return replayed
         if self.quota is None:
             raise ProviderUnavailableError("live calls need a quota gate")
         quota_wait_ms = 0
@@ -206,6 +213,8 @@ class LlmClient:
             self._record(
                 request, request_sha, result, status="ok", run_id=run_id, eval_run_id=eval_run_id
             )
+            if self.observer:
+                self.observer(request, result)
             return result
         raise ProviderUnavailableError("unreachable")  # pragma: no cover
 
@@ -233,7 +242,7 @@ class LlmClient:
                         f"invalid after {attempt + 1} tries: {exc}"
                     ) from exc
                 feedback = (
-                    "Your previous reply did not match the required JSON schema. Errors:\n"
+                    f"{SCHEMA_FEEDBACK} Errors:\n"
                     + exc.json(include_url=False, include_input=False)
                     + "\nReply again with JSON that matches the schema exactly."
                 )

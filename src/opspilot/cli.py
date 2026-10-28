@@ -28,6 +28,7 @@ from opspilot.db.session import (
 )
 from opspilot.domain.enums import JobType
 from opspilot.evaluation.archive import archive_bundle
+from opspilot.evaluation.cli import add_eval
 from opspilot.evaluation.datasets import DatasetError, freeze_dataset, load_bundle
 from opspilot.evaluation.generator.build import DEFAULT_SPECS, SplitSpec, generate
 from opspilot.evaluation.generator.bundle import (
@@ -59,7 +60,6 @@ from opspilot.policy.retrieve import Embedder, active_version_id, index_policy, 
 log = structlog.get_logger()
 
 _PLANNED: dict[str, tuple[str, str]] = {
-    "eval": ("Run, score or rescore an evaluation", "P14"),
     "backup": ("Back up the database and documents volume", "P15+"),
     "restore": ("Restore a backup", "P15+"),
 }
@@ -484,6 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_cmd.set_defaults(handler=_cleanup)
     for add in (_add_policy, _add_admin, _add_data, _add_llm, _add_audit, _add_agent):
         add(sub)
+    add_eval(sub, LIVE_HELP)
     for name, (help_text, phase) in _PLANNED.items():
         cmd = sub.add_parser(name, help=f"{help_text} ({phase})")
         cmd.set_defaults(handler=_not_implemented(name, phase))

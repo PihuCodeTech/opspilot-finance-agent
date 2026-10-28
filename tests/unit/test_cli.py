@@ -10,8 +10,13 @@ from opspilot.config import LlmMode, get_settings
 
 
 def test_planned_commands_exit_with_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["eval"]) == 2
-    assert "planned for P14" in capsys.readouterr().err
+    assert main(["backup"]) == 2
+    assert "planned for P15+" in capsys.readouterr().err
+
+
+def test_eval_requires_a_subcommand() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["eval"])
 
 
 def test_parser_requires_a_command() -> None:

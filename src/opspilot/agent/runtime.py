@@ -72,7 +72,7 @@ class ItemReport:
     failure: str | None
 
 
-def _git_sha() -> str:
+def git_sha() -> str:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],  # noqa: S607  # fixed command, no input
@@ -110,7 +110,7 @@ def run_slice(
                 model=agent.deps.llm.provider.model,
                 prompt_versions=prompt_versions(),
                 policy_version_id=active_version_id(engine),
-                git_sha=_git_sha(),
+                git_sha=git_sha(),
                 status=EvalRunStatus.RUNNING,
             )
         )

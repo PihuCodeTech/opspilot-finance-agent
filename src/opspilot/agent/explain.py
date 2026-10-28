@@ -87,16 +87,16 @@ def check_key(code: str, subject: str) -> str:
     return f"{code}@{subject}"
 
 
-def _numbers(text: str) -> set[Decimal]:
+def numbers_in(text: str) -> set[Decimal]:
     return {Decimal(m.replace(",", "")) for m in _NUMBER.findall(text)}
 
 
 def evidence_numbers(checks: Iterable[CheckView], passages: Iterable[PassageRef]) -> set[Decimal]:
     found: set[Decimal] = set()
     for check in checks:
-        found |= _numbers(json.dumps([check.compared, check.tolerance, check.subject]))
+        found |= numbers_in(json.dumps([check.compared, check.tolerance, check.subject]))
     for passage in passages:
-        found |= _numbers(f"{passage.section_id} {passage.text}")
+        found |= numbers_in(f"{passage.section_id} {passage.text}")
     return found
 
 
@@ -125,7 +125,7 @@ def validate(
             (checks[k] for k in note.check_results if k in checks),
             (passages[s] for s in note.policy_sections if s in passages),
         )
-        stray = sorted(str(n) for n in _numbers(note.explanation) if n not in allowed_numbers)
+        stray = sorted(str(n) for n in numbers_in(note.explanation) if n not in allowed_numbers)
         if stray:
             errors.append(f"{note.finding}: numbers not in the cited evidence: {stray}")
     if output.proposed_action not in {a.value for a in allowed}:

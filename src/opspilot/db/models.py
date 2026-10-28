@@ -414,6 +414,8 @@ class EvalRun(Base):
     policy_version_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("policy_versions.id"))
     git_sha: Mapped[str] = mapped_column(Text)
     status: Mapped[EvalRunStatus] = mapped_column(pg_enum(EvalRunStatus, "eval_run_status"))
+    # LLM mode, call and tool budgets, subset file digest, final-set flag (migration 0009).
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=sql_text("'{}'::jsonb"))
     started_at: Mapped[dt.datetime] = now_column()
     finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
